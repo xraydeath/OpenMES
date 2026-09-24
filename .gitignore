@@ -1,0 +1,23 @@
+# Gradle / Kotlin
+.gradle/
+build/
+.kotlin/
+local.properties
+
+# IDE
+*.iml
+.idea/
+.DS_Store
+captures/
+.externalNativeBuild/
+.cxx/
+
+# Артефакты сборки и ключи подписи
+app/release/
+*.apk
+*.aab
+*.ap_
+*.dex
+*.jks
+*.keystore
+*.hprof

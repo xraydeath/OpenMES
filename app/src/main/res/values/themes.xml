@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+
+    <style name="Theme.OpenMES" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@android:color/white</item>
+    </style>
+
+    <!-- Сплеш-экран в брендовый синий -->
+    <style name="Theme.OpenMES.Starting" parent="Theme.SplashScreen">
+        <item name="windowSplashScreenBackground">@color/openmes_blue</item>
+        <item name="windowSplashScreenAnimatedIcon">@drawable/ic_splash</item>
+        <item name="postSplashScreenTheme">@style/Theme.OpenMES</item>
+    </style>
+
+</resources>

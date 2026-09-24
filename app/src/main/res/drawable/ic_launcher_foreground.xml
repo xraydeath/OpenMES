@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Форграунд адаптивной иконки: открытая книга (дневник) -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <group
+        android:pivotX="54"
+        android:pivotY="54"
+        android:scaleX="0.62"
+        android:scaleY="0.62">
+        <!-- левая страница -->
+        <path
+            android:fillColor="#FFFFFF"
+            android:pathData="M52,36 C46,30 36,28 30,29 L30,60 C36,59 46,61 52,66 Z" />
+        <!-- правая страница -->
+        <path
+            android:fillColor="#FFFFFF"
+            android:pathData="M56,36 C62,30 72,28 78,29 L78,60 C72,59 62,61 56,66 Z" />
+        <!-- корешок -->
+        <path
+            android:fillColor="#D9E2FF"
+            android:pathData="M52,66 L54,68 L56,66 L56,36 L54,34 L52,36 Z" />
+    </group>
+</vector>
