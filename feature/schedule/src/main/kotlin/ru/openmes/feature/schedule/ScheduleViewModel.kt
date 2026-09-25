@@ -23,7 +23,13 @@ import ru.openmes.core.common.runSuspendCatching
 import ru.openmes.core.data.DiaryRepository
 import ru.openmes.core.data.Session
 import ru.openmes.core.data.SessionRepository
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import ru.openmes.core.model.DayInfo
 import ru.openmes.core.model.DayKind
+import ru.openmes.core.model.LessonModule
+import ru.openmes.core.model.TestLesson
+import java.io.File
 import ru.openmes.core.model.Lesson
 import ru.openmes.core.model.LessonDetails
 import java.time.LocalDate
@@ -49,11 +55,35 @@ class ScheduleViewModel(
         val error: String? = null,
         /** Индекс по дням: пересчитывается только при обновлении кэша (см. [withMonths]), а не на каждую страницу. */
         val byDate: Map<LocalDate, List<Lesson>> = emptyMap(),
-        /** Календарь дневника: праздники/каникулы. Пусто — ещё не загружен (тогда красное только воскресенье). */
-        val dayKinds: Map<LocalDate, DayKind> = emptyMap(),
+        /** Календарь дневника: праздники/каникулы/переносы. Пусто — ещё не загружен (тогда красное только воскресенье). */
+        val days: Map<LocalDate, DayInfo> = emptyMap(),
+        /** Модули (темы) предметов текущего года. */
+        val modules: List<LessonModule> = emptyList(),
+        /** Контрольные занятия по месяцам. */
+        val tests: Map<YearMonth, List<TestLesson>> = emptyMap(),
     ) {
-        fun dayKind(date: LocalDate): DayKind = dayKinds[date]
+        fun dayKind(date: LocalDate): DayKind = days[date]?.kind
             ?: if (date.dayOfWeek == java.time.DayOfWeek.SUNDAY) DayKind.HOLIDAY else DayKind.WORKDAY
+
+        fun dayInfo(date: LocalDate): DayInfo? = days[date]
+
+        /** Контрольное занятие: по id урока, иначе по дате и предмету. */
+        fun testFor(lesson: Lesson): TestLesson? {
+            val list = tests[YearMonth.from(lesson.date)].orEmpty()
+            val id = lesson.id.toLongOrNull()
+            return list.firstOrNull { id != null && it.lessonId == id }
+                ?: list.firstOrNull { test ->
+                    test.date == lesson.date && (
+                        (test.subjectId != null && test.subjectId == lesson.subjectId) ||
+                            (test.subjectName != null && test.subjectName.equals(lesson.subjectName, ignoreCase = true))
+                        )
+                }
+        }
+
+        /** Модуль предмета, действующий на дату урока (из пересекающихся — начатый позже). */
+        fun moduleFor(lesson: Lesson): LessonModule? = lesson.subjectId?.let { subjectId ->
+            modules.filter { it.subjectId == subjectId && it.covers(lesson.date) }.maxByOrNull { it.start ?: LocalDate.MIN }
+        }
 
         fun lessonsFor(date: LocalDate): List<Lesson> = byDate[date].orEmpty()
 
@@ -101,8 +131,9 @@ class ScheduleViewModel(
                     _detailsById.clear()
                     detailsInFlight.clear()
                     detailsFailed.clear()
-                    _state.update { it.withMonths(emptyMap()).copy(error = null, dayKinds = emptyMap()) }
+                    _state.update { it.withMonths(emptyMap()).copy(error = null, days = emptyMap(), modules = emptyList(), tests = emptyMap()) }
                     loadDayKinds(childId)
+                    loadModules(childId)
                 }
                 ensureMonth(YearMonth.from(_state.value.selectedDate))
             }
@@ -145,11 +176,58 @@ class ScheduleViewModel(
         val yearEnd = yearStart.plusYears(1).minusDays(1)
         viewModelScope.launch {
             // Сначала сохранённый календарь (мгновенно), затем свежий из сети.
-            diaryRepository.cachedOnly { getDayKinds(childId, yearStart, yearEnd) }?.let { kinds ->
-                if (loadedChildId == childId && _state.value.dayKinds.isEmpty()) _state.update { it.copy(dayKinds = kinds) }
+            diaryRepository.cachedOnly { getCalendar(childId, yearStart, yearEnd) }?.let { days ->
+                if (loadedChildId == childId && _state.value.days.isEmpty()) _state.update { it.copy(days = days) }
             }
-            runSuspendCatching { diaryRepository.getDayKinds(childId, yearStart, yearEnd) }
-                .onSuccess { kinds -> if (loadedChildId == childId) _state.update { it.copy(dayKinds = kinds) } }
+            runSuspendCatching { diaryRepository.getCalendar(childId, yearStart, yearEnd) }
+                .onSuccess { days -> if (loadedChildId == childId) _state.update { it.copy(days = days) } }
+        }
+    }
+
+    /** Модули (темы) предметов — для шторки урока. */
+    private fun loadModules(childId: String?) {
+        childId ?: return
+        viewModelScope.launch {
+            diaryRepository.cachedOnly { getLessonModules(childId) }?.let { modules ->
+                if (loadedChildId == childId && _state.value.modules.isEmpty()) _state.update { it.copy(modules = modules) }
+            }
+            runSuspendCatching { diaryRepository.getLessonModules(childId) }
+                .onSuccess { modules -> if (loadedChildId == childId) _state.update { it.copy(modules = modules) } }
+        }
+    }
+
+    /** Контрольные месяца: дополнение к расписанию, ошибки не показываем. */
+    private fun loadTests(childId: String, month: YearMonth) {
+        viewModelScope.launch {
+            if (month !in _state.value.tests) {
+                diaryRepository.cachedOnly { getTestLessons(childId, month.atDay(1), month.atEndOfMonth()) }?.let { tests ->
+                    if (loadedChildId == childId && month !in _state.value.tests) _state.update { it.copy(tests = it.tests + (month to tests)) }
+                }
+            }
+            runSuspendCatching { diaryRepository.getTestLessons(childId, month.atDay(1), month.atEndOfMonth()) }
+                .onSuccess { tests -> if (loadedChildId == childId) _state.update { it.copy(tests = it.tests + (month to tests)) } }
+        }
+    }
+
+    var pdfExporting by mutableStateOf(false)
+        private set
+
+    /** PDF расписания недели [monday]..+6 → файл в [dir]. */
+    fun exportWeekPdf(monday: LocalDate, dir: File, onResult: (Result<File>) -> Unit) {
+        val childId = loadedChildId ?: return
+        if (pdfExporting) return
+        pdfExporting = true
+        viewModelScope.launch {
+            val result = runSuspendCatching {
+                val bytes = diaryRepository.getSchedulePdf(childId, monday, monday.plusDays(6))
+                check(bytes.size > 4 && bytes.decodeToString(0, 4) == "%PDF") { "Сервер вернул не PDF" }
+                withContext(Dispatchers.IO) {
+                    dir.mkdirs()
+                    File(dir, "schedule_$monday.pdf").apply { writeBytes(bytes) }
+                }
+            }
+            pdfExporting = false
+            onResult(result)
         }
     }
 
@@ -163,7 +241,7 @@ class ScheduleViewModel(
         detailsJob?.cancel()
         // Уже подгружено заранее — показываем сразу полностью, без догрузки.
         _detailsById[lessonId]?.let {
-            lessonDetails = it
+            lessonDetails = it.withLesson(lesson)
             lessonDetailsLoading = false
             return
         }
@@ -181,18 +259,28 @@ class ScheduleViewModel(
             homework = lesson.homework?.task,
             homeworkDone = lesson.homework?.isDone == true,
             marks = lesson.marks,
-        )
+            isDistance = lesson.isDistance,
+            joinUrl = lesson.joinUrl,
+        ).withLesson(lesson)
         detailsJob = viewModelScope.launch {
             lessonDetailsLoading = true
             runSuspendCatching { diaryRepository.getLessonDetails(childId, lessonId) }
                 .onSuccess {
                     _detailsById[lessonId] = it
                     // Шторку могли закрыть, пока шёл запрос, — тогда не открываем заново.
-                    if (lessonDetails?.id == lessonId) lessonDetails = it
+                    if (lessonDetails?.id == lessonId) lessonDetails = it.withLesson(lesson)
                 }
             lessonDetailsLoading = false
         }
     }
+
+    /** Детали урока не содержат ссылку на подключение — берём её из расписания. */
+    private fun LessonDetails.withLesson(lesson: Lesson) = copy(
+        isDistance = isDistance || lesson.isDistance,
+        joinUrl = joinUrl ?: lesson.joinUrl,
+        module = module ?: _state.value.moduleFor(lesson)?.name,
+        testName = testName ?: _state.value.testFor(lesson)?.let { it.name ?: "Контрольное занятие" },
+    )
 
     fun closeLessonDetails() {
         detailsJob?.cancel()
@@ -259,6 +347,7 @@ class ScheduleViewModel(
             return
         }
         inFlight += month
+        loadTests(childId, month)
         _state.update { it.copy(loading = true, error = null) }
         viewModelScope.launch {
             // Холодный старт: сначала месяц из офлайн-кэша (мгновенно), сеть обновит его ниже.

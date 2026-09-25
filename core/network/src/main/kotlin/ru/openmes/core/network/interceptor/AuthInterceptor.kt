@@ -49,7 +49,8 @@ class AuthInterceptor(
 }
 
 /** Сервисы, которые принимают только Authorization: Bearer (без auth-token). */
-internal fun Request.isBearerOnly(): Boolean = url.encodedPath.startsWith("/api/food/")
+internal fun Request.isBearerOnly(): Boolean =
+    url.encodedPath.startsWith("/api/food/") || url.encodedPath.startsWith("/api/pass/")
 
 /**
  * Автообновление по 401: te(refresh) → sudir/auth → новый mesh (схема OctoDiary).
@@ -71,7 +72,7 @@ class TokenAuthenticator(
         }
 
         val bearerOnly = response.request.isBearerOnly()
-        // Второй 401 от питания после обновления токена — проблема сервиса, а не сессии: не разлогиниваем.
+        // Второй 401 от питания/проходов после обновления токена — проблема сервиса, а не сессии: не разлогиниваем.
         if (bearerOnly && responseCount(response) >= 2) return null
 
         val requestToken = response.request.header(MesEnvironment.HEADER_AUTH_TOKEN)

@@ -12,6 +12,7 @@ import retrofit2.http.Header
 import retrofit2.http.POST
 import retrofit2.http.Path
 import retrofit2.http.Query
+import retrofit2.http.Streaming
 
 /**
  * Family Mobile API (mapi) — по рабочему рецепту OctoDiary:
@@ -192,6 +193,52 @@ interface MesApi {
         @Query("class_unit_id") classUnitId: Long,
         @Query("school_id") schoolId: Long,
     ): SchoolInfoDto
+
+    // ---------------------------------------------------------------------
+    // Планирование: модули/темы, контрольные; календарь переносов дней
+    // (/api/ej/... → CollegeRouting → /api/profeducation/...)
+    // ---------------------------------------------------------------------
+
+    /** Модули (темы) предметов за учебный год. */
+    @GET("api/ej/plan/family/v1/lesson_modules")
+    suspend fun getLessonModules(
+        @Query("student_profile_id") studentProfileId: String,
+        @Query("academic_year_id") academicYearId: Long,
+    ): List<LessonModuleDto>
+
+    /** Контрольные/зачётные занятия за период. Схема элементов у колледжа не подтверждена — разбираем гибко. */
+    @GET("api/ej/plan/family/v1/test_lessons/period")
+    suspend fun getTestLessons(
+        @Query("student_profile_id") studentProfileId: String,
+        @Query("student_person_id") studentPersonId: String,
+        @Query("from") from: String,
+        @Query("to") to: String,
+    ): TestLessonsResponse
+
+    /** Переносы дней календаря: праздники и рабочие дни «по расписанию другого дня». */
+    @GET("api/ej/core/family/v1/calendars/{calendar_id}/calendar_transpositions")
+    suspend fun getCalendarTranspositions(
+        @Path("calendar_id") calendarId: Long,
+    ): List<CalendarTranspositionDto>
+
+    /** PDF расписания за период (не кэшируется: не JSON). */
+    @Streaming
+    @GET("api/eventcalendar/v1/api/events/schedule/pdf")
+    suspend fun getSchedulePdf(
+        @Query("person_ids") personIds: String,
+        @Query("begin_date") beginDate: String,
+        @Query("end_date") endDate: String,
+        @Header("X-Mes-Role") mesRole: String = "student",
+        @Header("Client-Type") clientType: String = "diary-mobile",
+    ): ResponseBody
+
+    /** Проходы через турникеты: не больше 7 дней за запрос, только Bearer. */
+    @GET("api/pass/entrances/v1/visit_durations")
+    suspend fun getVisitDurations(
+        @Query("personId") personId: String,
+        @Query("from") from: String,
+        @Query("to") to: String,
+    ): VisitDurationsResponse
 
     // ---------------------------------------------------------------------
     // Аватары (avatarmanagement; person_id = contingent_guid)
@@ -739,4 +786,50 @@ data class PeriodScheduleDayDto(
     val date: String,
     val type: String? = null,
     val title: String? = null,
+)
+
+/** Модуль (тема) предмета; даты — массивом [год, месяц, день]. */
+@Serializable
+data class LessonModuleDto(
+    @SerialName("id") val id: Long = 0,
+    @SerialName("name") val name: String = "",
+    @SerialName("subject_id") val subjectId: Long? = null,
+    @SerialName("start_date") val startDate: List<Int>? = null,
+    @SerialName("end_date") val endDate: List<Int>? = null,
+)
+
+@Serializable
+data class TestLessonsResponse(
+    @SerialName("items") val items: List<JsonObject>? = null,
+)
+
+@Serializable
+data class CalendarTranspositionDto(
+    @SerialName("id") val id: Long = 0,
+    @SerialName("is_holiday") val isHoliday: Boolean = false,
+    @SerialName("date") val date: String? = null,
+    @SerialName("postponed_from") val postponedFrom: String? = null,
+    @SerialName("schedule_for_weekday") val scheduleForWeekday: Int? = null,
+    @SerialName("note") val note: String? = null,
+)
+
+@Serializable
+data class VisitDurationsResponse(
+    @SerialName("payload") val payload: List<VisitDayDto> = emptyList(),
+)
+
+@Serializable
+data class VisitDayDto(
+    @SerialName("date") val date: String = "",
+    @SerialName("visits") val visits: List<VisitDto> = emptyList(),
+)
+
+@Serializable
+data class VisitDto(
+    @SerialName("in") val entered: String? = null,
+    @SerialName("out") val left: String? = null,
+    @SerialName("duration") val duration: String? = null,
+    @SerialName("kindName") val kindName: String? = null,
+    @SerialName("isIncomplete") val isIncomplete: Boolean = false,
+    @SerialName("organizationShortName") val organizationShortName: String? = null,
 )

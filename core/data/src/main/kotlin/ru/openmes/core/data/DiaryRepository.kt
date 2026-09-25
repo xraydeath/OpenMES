@@ -1,6 +1,9 @@
 package ru.openmes.core.data
 
-import ru.openmes.core.model.DayKind
+import ru.openmes.core.model.DayInfo
+import ru.openmes.core.model.LessonModule
+import ru.openmes.core.model.TestLesson
+import ru.openmes.core.model.VisitDay
 import ru.openmes.core.model.AcademicYear
 import ru.openmes.core.model.AttendanceEntry
 import ru.openmes.core.model.Homework
@@ -77,8 +80,20 @@ interface DiaryRepository {
     /** Электронный студенческий билет. */
     suspend fun getStudentCard(personId: String): StudentCard
 
-    /** Календарь дней (рабочий / праздник / каникулы) за период. */
-    suspend fun getDayKinds(personId: String, from: LocalDate, to: LocalDate): Map<LocalDate, DayKind>
+    /** Календарь дней (рабочий / праздник / каникулы, период, переносы) за период. */
+    suspend fun getCalendar(personId: String, from: LocalDate, to: LocalDate): Map<LocalDate, DayInfo>
+
+    /** Модули (темы) предметов текущего учебного года. */
+    suspend fun getLessonModules(personId: String): List<LessonModule>
+
+    /** Контрольные/зачётные занятия за период. */
+    suspend fun getTestLessons(personId: String, from: LocalDate, to: LocalDate): List<TestLesson>
+
+    /** Проходы через турникеты за период (запрашиваются неделями). */
+    suspend fun getVisits(personId: String, from: LocalDate, to: LocalDate): List<VisitDay>
+
+    /** PDF расписания за период. */
+    suspend fun getSchedulePdf(personId: String, from: LocalDate, to: LocalDate): ByteArray
 
     /** URL текущего аватара (null — аватар не загружен). */
     suspend fun getAvatarUrl(personGuid: String): String?

@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">OpenMES</string>
+    <string name="widget_schedule_description">Ближайшие пары на сегодня или следующий учебный день</string>
     <string name="app_name_full">OpenMES — Колледж МЭШ</string>
 </resources>

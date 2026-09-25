@@ -3,6 +3,9 @@
 
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- Напоминания о парах: точное время (без разрешения — приблизительно) и восстановление после перезагрузки. -->
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
 
     <application
         android:name=".OpenMESApp"
@@ -33,6 +36,49 @@
                 <data android:scheme="diary-po" android:host="oauth2redirect" />
             </intent-filter>
         </activity>
+
+        <!-- Виджет «Расписание» на рабочем столе. -->
+        <receiver
+            android:name=".widget.ScheduleWidgetReceiver"
+            android:exported="true"
+            android:label="Расписание">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/schedule_widget_info" />
+        </receiver>
+
+        <!-- Напоминания: пары, вечерние ДЗ/контрольные, восстановление будильников. -->
+        <receiver
+            android:name=".notify.LessonReminderReceiver"
+            android:exported="false" />
+        <receiver
+            android:name=".notify.EveningReminderReceiver"
+            android:exported="false" />
+        <receiver
+            android:name=".notify.RescheduleReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+                <action android:name="android.intent.action.TIME_SET" />
+                <action android:name="android.intent.action.TIMEZONE_CHANGED" />
+                <action android:name="android.app.action.SCHEDULE_EXACT_ALARM_PERMISSION_STATE_CHANGED" />
+            </intent-filter>
+        </receiver>
+
+        <!-- PDF расписания: открыть/поделиться из кэша приложения. -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.files"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
     </application>
 
 </manifest>

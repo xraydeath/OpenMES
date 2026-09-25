@@ -28,6 +28,10 @@ import androidx.compose.material.icons.rounded.Calculate
 import androidx.compose.material.icons.rounded.DeleteSweep
 import androidx.compose.material.icons.rounded.Keyboard
 import androidx.compose.material.icons.rounded.Refresh
+import androidx.compose.material.icons.rounded.Tune
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.FilledTonalIconButton
@@ -60,14 +64,14 @@ import ru.openmes.core.designsystem.components.ShapeIcon
 import ru.openmes.core.designsystem.components.markShape
 import ru.openmes.core.designsystem.components.markTone
 import ru.openmes.core.model.Mark
+import ru.openmes.core.model.RoundingRules
 import ru.openmes.core.model.SubjectPeriod
 import kotlin.math.round
-import kotlin.math.roundToInt
 
 /**
  * Калькулятор оценок (перенос MarkCalculator из OctoDiary-kt):
  * тап по оценке убирает её, «+5/+4/+3/+2» или строка «5 4^2 3» (^ — вес) добавляют.
- * Средний — взвешенный, округление до сотых; итоговая — математическое округление.
+ * Средний — взвешенный, округление до сотых; итоговая — по порогам [rules] (настраиваются).
  */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -76,7 +80,13 @@ internal fun MarkCalculator(
     period: SubjectPeriod,
     keyboardMode: Boolean,
     onKeyboardModeChange: (Boolean) -> Unit,
+    rules: RoundingRules,
+    onRulesChange: (RoundingRules) -> Unit,
 ) {
+    var editRules by remember { mutableStateOf(false) }
+    if (editRules) {
+        RoundingRulesDialog(rules, onDismiss = { editRules = false }, onSave = { onRulesChange(it); editRules = false })
+    }
     var marks by remember(period) { mutableStateOf(period.marks) }
     var counter by remember { mutableIntStateOf(0) }
     var text by remember { mutableStateOf("") }
@@ -148,12 +158,14 @@ internal fun MarkCalculator(
                         }
                     }
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        MarkBadge(average.roundToInt().toString(), large = true)
+                        MarkBadge(rules.markFor(average).toString(), large = true)
                         Text("итог", style = MaterialTheme.typography.labelMedium)
                     }
                 }
             }
         }
+
+        if (valid && marks.isNotEmpty()) GoalsCard(marks, rules, onEditRules = { editRules = true })
 
         if (marks.isNotEmpty()) {
             FlowRow(
@@ -226,6 +238,143 @@ internal fun MarkCalculator(
     }
 }
 
+/**
+ * «Что нужно»: сколько оценок веса 1 не хватает до каждой итоговой выше текущей
+ * и сколько двоек выдержит текущая. Пороги округления сервер колледжа не отдаёт —
+ * их задаёт пользователь ([RoundingRulesDialog]).
+ */
+@Composable
+private fun GoalsCard(marks: List<Mark>, rules: RoundingRules, onEditRules: () -> Unit) {
+    val current = rules.markFor(marks.weightedAverage())
+    val goals = (current + 1..5).map { target ->
+        val options = (5 downTo target).mapNotNull { value ->
+            marksNeeded(marks, value, target, rules)?.let { "$it × $value" }
+        }
+        "до «$target»" to (options.joinToString(" или ").ifEmpty { "больше $MAX_NEEDED оценок — недостижимо" })
+    }
+    val reserve = if (current > 2) marksReserve(marks, 2, current, rules) else null
+    if (goals.isEmpty() && reserve == null) return
+    Surface(
+        shape = MaterialTheme.shapes.large,
+        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text("Что нужно", style = MaterialTheme.typography.titleMediumEmphasized)
+            goals.forEach { (title, value) ->
+                Row {
+                    Text(title, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.width(72.dp))
+                    Text(value, style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+            if (reserve != null) {
+                Text(
+                    when (reserve) {
+                        0 -> "Любая двойка опустит итог до «${current - 1}»"
+                        MAX_NEEDED -> "«$current» не опустится даже от $MAX_NEEDED двоек"
+                        else -> "«$current» выдержит двоек: $reserve"
+                    },
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    "Оценки веса 1. Пороги: ${rules.describe()}",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.weight(1f),
+                )
+                TextButton(onClick = onEditRules, shapes = ButtonDefaults.shapes()) {
+                    Icon(Icons.Rounded.Tune, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text("Изменить")
+                }
+            }
+        }
+    }
+}
+
+internal const val MAX_NEEDED = 30
+
+/** Сколько оценок [value] (вес 1) нужно, чтобы итог стал не ниже [target]; null — больше [MAX_NEEDED]. */
+internal fun marksNeeded(marks: List<Mark>, value: Int, target: Int, rules: RoundingRules = RoundingRules.STANDARD): Int? =
+    (0..MAX_NEEDED).firstOrNull { n -> rules.markFor((marks + extra(value, n)).weightedAverage()) >= target }
+
+/** Сколько оценок [value] подряд итог [current] выдержит, не опустившись (не больше [MAX_NEEDED]). */
+internal fun marksReserve(marks: List<Mark>, value: Int, current: Int, rules: RoundingRules = RoundingRules.STANDARD): Int =
+    (1..MAX_NEEDED).firstOrNull { n -> rules.markFor((marks + extra(value, n)).weightedAverage()) < current }
+        ?.minus(1) ?: MAX_NEEDED
+
+private fun Double.fmt(): String = "%.2f".format(this).trimEnd('0').trimEnd(',', '.')
+
+private fun RoundingRules.describe() = "«5» от ${five.fmt()}, «4» от ${four.fmt()}, «3» от ${three.fmt()}"
+
+/** Пороги округления: готовые варианты или свои значения. */
+@Composable
+private fun RoundingRulesDialog(rules: RoundingRules, onDismiss: () -> Unit, onSave: (RoundingRules) -> Unit) {
+    var five by remember { mutableStateOf(rules.five.fmt()) }
+    var four by remember { mutableStateOf(rules.four.fmt()) }
+    var three by remember { mutableStateOf(rules.three.fmt()) }
+    fun parse(v: String) = v.trim().replace(',', '.').toDoubleOrNull()
+    val candidate = parse(five)?.let { f -> parse(four)?.let { fo -> parse(three)?.let { t -> RoundingRules(f, fo, t) } } }
+    val ok = candidate?.isValid == true
+    val presets = listOf(RoundingRules.STANDARD, RoundingRules.SOFT, RoundingRules.STRICT)
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        icon = { Icon(Icons.Rounded.Tune, contentDescription = null) },
+        title = { Text("Пороги округления") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text(
+                    "С какого среднего балла ставится итоговая. В колледжах бывает по-разному — уточните у куратора.",
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    presets.forEach { p ->
+                        FilterChip(
+                            selected = candidate == p,
+                            onClick = { five = p.five.fmt(); four = p.four.fmt(); three = p.three.fmt() },
+                            label = { Text(p.five.fmt()) },
+                        )
+                    }
+                }
+                listOf(
+                    Triple("«5» от", five) { v: String -> five = v },
+                    Triple("«4» от", four) { v: String -> four = v },
+                    Triple("«3» от", three) { v: String -> three = v },
+                ).forEach { (label, value, set) ->
+                    OutlinedTextField(
+                        value = value,
+                        onValueChange = { v -> set(v.filter { it.isDigit() || it == ',' || it == '.' }.take(5)) },
+                        label = { Text(label) },
+                        singleLine = true,
+                        isError = parse(value)?.let { it in 2.0..5.0 } != true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+                if (!ok) {
+                    Text(
+                        "Пороги от 2 до 5, и «5» > «4» > «3»",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { candidate?.let(onSave) }, enabled = ok, shapes = ButtonDefaults.shapes()) { Text("Сохранить") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss, shapes = ButtonDefaults.shapes()) { Text("Отмена") }
+        },
+    )
+}
+
+private fun extra(value: Int, n: Int) = List(n) { Mark(id = "goal_$it", value = value.toString(), weight = 1) }
+
 /** Кнопка «+оценка»: форма и тон — как у плашки этой оценки. */
 @Composable
 private fun AddMarkButton(value: Int, onClick: () -> Unit) {
@@ -261,7 +410,7 @@ private fun AddMarkButton(value: Int, onClick: () -> Unit) {
 
 private fun List<Mark>.isValidForCalc(): Boolean = all { it.value.trim().toIntOrNull() != null }
 
-private fun List<Mark>.weightedAverage(): Double {
+internal fun List<Mark>.weightedAverage(): Double {
     val totalWeight = sumOf { (it.weight ?: 1).coerceAtLeast(1) }
     if (totalWeight == 0) return 0.0
     val sum = sumOf { it.value.trim().toInt() * (it.weight ?: 1).coerceAtLeast(1) }

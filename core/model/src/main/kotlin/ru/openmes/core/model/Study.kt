@@ -10,6 +10,9 @@ data class AcademicYear(
     val start: LocalDate,
     val end: LocalDate,
     val periods: List<Period> = emptyList(),
+    /** Календарь года (для переносов дней). */
+    val calendarId: Long? = null,
+    val isCurrent: Boolean = false,
 )
 
 data class Period(
@@ -28,11 +31,15 @@ data class Lesson(
     val startTime: LocalTime?,
     val endTime: LocalTime?,
     val subjectName: String,
+    val subjectId: Long? = null,
     val room: String? = null,
     val teacherName: String? = null,
     val marks: List<Mark> = emptyList(),
     val homework: Homework? = null,
+    /** Дистанционное занятие (есть ссылка на подключение). */
     val isDistance: Boolean = false,
+    /** Ссылка на подключение к дистанционному занятию (link_to_join). */
+    val joinUrl: String? = null,
     /** Источник события: PLAN (плановый урок) | EC | AE | EVENTS — цвет карточки. */
     val source: String? = null,
     /** Форма занятия («Практическое занятие»). */
@@ -133,3 +140,78 @@ data class StudentCard(
 
 /** Тип дня по календарю дневника (periods_schedules). */
 enum class DayKind { WORKDAY, HOLIDAY, VACATION }
+
+/**
+ * День календаря: тип, период («Теоретическое обучение», «Производственная практика»)
+ * и перенос («рабочий день по расписанию понедельника»).
+ */
+data class DayInfo(
+    val kind: DayKind,
+    val title: String? = null,
+    val note: String? = null,
+)
+
+/** Модуль (тема) предмета с датами действия. */
+data class LessonModule(
+    val id: Long,
+    val name: String,
+    val subjectId: Long?,
+    val start: LocalDate?,
+    val end: LocalDate?,
+) {
+    fun covers(date: LocalDate): Boolean =
+        (start == null || !date.isBefore(start)) && (end == null || !date.isAfter(end))
+}
+
+/** Контрольное/зачётное занятие (test_lessons). */
+data class TestLesson(
+    val date: LocalDate?,
+    val lessonId: Long?,
+    val subjectId: Long?,
+    val subjectName: String?,
+    /** Форма контроля: «Контрольная работа», «Зачёт»… */
+    val name: String?,
+)
+
+/** Проходы через турникеты за день. */
+data class VisitDay(
+    val date: LocalDate,
+    val visits: List<Visit>,
+)
+
+data class Visit(
+    val entered: LocalTime?,
+    val left: LocalTime?,
+    /** «3 ч.43 мин.» — как отдаёт сервер. */
+    val duration: String?,
+    val place: String?,
+    /** Нет отметки входа или выхода. */
+    val incomplete: Boolean,
+)
+
+/**
+ * Пороги округления среднего балла в итоговую: итог «5» — от [five], «4» — от [four], «3» — от [three].
+ * В колледжах бывают разные (4,5 или 4,67 до пятёрки), сервер их не отдаёт — задаёт пользователь.
+ */
+data class RoundingRules(
+    val five: Double = 4.5,
+    val four: Double = 3.5,
+    val three: Double = 2.5,
+) {
+    fun markFor(average: Double): Int = when {
+        average >= five - EPS -> 5
+        average >= four - EPS -> 4
+        average >= three - EPS -> 3
+        else -> 2
+    }
+
+    /** Пороги по убыванию и в диапазоне 2..5. */
+    val isValid: Boolean get() = five in 2.0..5.0 && four in 2.0..5.0 && three in 2.0..5.0 && five > four && four > three
+
+    companion object {
+        val STANDARD = RoundingRules()
+        val STRICT = RoundingRules(4.67, 3.67, 2.67)
+        val SOFT = RoundingRules(4.6, 3.6, 2.6)
+        private const val EPS = 1e-9
+    }
+}

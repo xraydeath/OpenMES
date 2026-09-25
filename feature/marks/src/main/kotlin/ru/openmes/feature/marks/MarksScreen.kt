@@ -115,6 +115,7 @@ import ru.openmes.core.model.SubjectPeriod
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import kotlin.math.roundToInt
+import ru.openmes.core.model.RoundingRules
 
 // ---------------------------------------------------------------------------
 // ViewModel
@@ -152,6 +153,14 @@ class MarksViewModel(
     val calculatorKeyboard: StateFlow<Boolean> = settingsRepository.settings
         .map { it.calculatorKeyboard }
         .stateIn(viewModelScope, SharingStarted.Eagerly, false)
+
+    val roundingRules: StateFlow<RoundingRules> = settingsRepository.settings
+        .map { it.roundingRules }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, RoundingRules.STANDARD)
+
+    fun setRoundingRules(rules: RoundingRules) = viewModelScope.launch {
+        settingsRepository.setRoundingRules(rules)
+    }
 
     private val _state = MutableStateFlow(MarksUiState())
     val state = _state.asStateFlow()
@@ -287,6 +296,7 @@ fun MarksScreen(viewModel: MarksViewModel) {
     // BottomSheet калькулятора оценок
     viewModel.calculator?.let { (subject, period) ->
         val keyboard by viewModel.calculatorKeyboard.collectAsStateWithLifecycle()
+        val rules by viewModel.roundingRules.collectAsStateWithLifecycle()
         ModalBottomSheet(
             onDismissRequest = viewModel::closeCalculator,
             sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
@@ -296,6 +306,8 @@ fun MarksScreen(viewModel: MarksViewModel) {
                 period = period,
                 keyboardMode = keyboard,
                 onKeyboardModeChange = { viewModel.setCalculatorKeyboard(it) },
+                rules = rules,
+                onRulesChange = { viewModel.setRoundingRules(it) },
             )
         }
     }

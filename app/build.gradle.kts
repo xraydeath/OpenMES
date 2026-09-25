@@ -16,7 +16,7 @@ android {
         targetSdk = 36
         // versionCode — номер сборки GitHub Actions: каждая сборка ставится поверх предыдущей.
         versionCode = System.getenv("BUILD_NUMBER")?.toIntOrNull() ?: 1
-        versionName = "0.2.0"
+        versionName = "0.3.0"
     }
 
     // Ключ релизов из окружения (GitHub Actions secrets). Без него — debug-ключ.
@@ -81,6 +81,7 @@ dependencies {
     implementation(libs.androidx.navigation.compose)
     implementation(libs.androidx.lifecycle.process)
     implementation(libs.androidx.work.runtime.ktx)
+    implementation(libs.androidx.glance.appwidget)
     implementation(libs.androidx.biometric)
     implementation(libs.androidx.fragment.ktx)
     implementation(libs.androidx.profileinstaller)

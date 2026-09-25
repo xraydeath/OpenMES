@@ -19,4 +19,12 @@ data class LessonDetails(
     val homework: String?,
     val homeworkDone: Boolean,
     val marks: List<Mark>,
+    /** Дистанционное занятие (is_virtual / remote_lesson / link_to_join). */
+    val isDistance: Boolean = false,
+    /** Ссылка на подключение — приходит только в расписании (eventcalendar). */
+    val joinUrl: String? = null,
+    /** Модуль/тема предмета на дату урока (lesson_modules). */
+    val module: String? = null,
+    /** Форма контроля, если урок — контрольное занятие (test_lessons). */
+    val testName: String? = null,
 )

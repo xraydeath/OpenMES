@@ -1,10 +1,5 @@
 package ru.openmes.feature.more
 
-import android.Manifest
-import android.content.pm.PackageManager
-import android.os.Build
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.biometric.BiometricManager
 import androidx.biometric.BiometricManager.Authenticators.BIOMETRIC_WEAK
 import androidx.compose.foundation.layout.Arrangement
@@ -29,7 +24,7 @@ import androidx.compose.material.icons.rounded.Palette
 import androidx.compose.material.icons.rounded.Password
 import androidx.compose.material.icons.rounded.Pin
 import androidx.compose.material.icons.rounded.School
-import androidx.compose.material.icons.rounded.VisibilityOff
+import androidx.compose.material.icons.rounded.Storage
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -56,7 +51,6 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
-import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import ru.openmes.core.data.ThemeMode
 import ru.openmes.core.designsystem.components.ConnectedChoiceGroup
@@ -72,29 +66,13 @@ import ru.openmes.core.designsystem.components.groupShape
  * Настройки: тема (в духе expressive), Material You, уведомления, PIN/биометрия, о приложении.
  */
 @Composable
-fun SettingsScreen(viewModel: MoreViewModel) {
+fun SettingsScreen(viewModel: MoreViewModel, onOpenCache: () -> Unit, onOpenNotifications: () -> Unit) {
     val settings by viewModel.settings.collectAsStateWithLifecycle()
     val context = LocalContext.current
     var pinDialog by remember { mutableStateOf(false) }
     val biometricAvailable = remember {
         BiometricManager.from(context).canAuthenticate(BIOMETRIC_WEAK) == BiometricManager.BIOMETRIC_SUCCESS
     }
-    // Android 13+: без разрешения уведомления молча не показываются.
-    val notificationPermission = rememberLauncherForActivityResult(
-        ActivityResultContracts.RequestPermission(),
-    ) { granted -> if (granted) viewModel.setMarksNotifications(true) }
-    val enableNotifications: (Boolean) -> Unit = { enabled ->
-        val needPermission = enabled &&
-            Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
-            ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) !=
-            PackageManager.PERMISSION_GRANTED
-        if (needPermission) {
-            notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
-        } else {
-            viewModel.setMarksNotifications(enabled)
-        }
-    }
-
     if (pinDialog) {
         PinSetupDialog(
             onDismiss = { pinDialog = false },
@@ -114,29 +92,6 @@ fun SettingsScreen(viewModel: MoreViewModel) {
                 subtitle = "Material You: палитра из обоев (Android 12+)",
                 checked = settings.dynamicColor,
                 onCheckedChange = viewModel::setDynamicColor,
-                shape = shape,
-            )
-        },
-    )
-    val notifications = listOf<@Composable (Shape) -> Unit>(
-        { shape ->
-            SwitchItem(
-                icon = Icons.Rounded.NotificationsActive,
-                title = "Новые оценки",
-                subtitle = "Проверять дневник в фоне примерно раз в час",
-                checked = settings.marksNotifications,
-                onCheckedChange = enableNotifications,
-                shape = shape,
-            )
-        },
-        { shape ->
-            SwitchItem(
-                icon = Icons.Rounded.VisibilityOff,
-                title = "Скрывать значение оценки",
-                subtitle = "В уведомлении будет только предмет",
-                checked = settings.hideMarkValues,
-                enabled = settings.marksNotifications,
-                onCheckedChange = viewModel::setHideMarkValues,
                 shape = shape,
             )
         },
@@ -211,10 +166,36 @@ fun SettingsScreen(viewModel: MoreViewModel) {
         group(appearance, offset = 1)
 
         item { SectionHeader("Уведомления", Modifier.padding(top = 12.dp)) }
-        group(notifications)
+        item {
+            val enabled = listOfNotNull(
+                "оценки".takeIf { settings.marksNotifications },
+                "пары".takeIf { settings.lessonReminders },
+                "расписание".takeIf { settings.scheduleChangeNotifications },
+                "ДЗ".takeIf { settings.homeworkReminders },
+                "контрольные".takeIf { settings.testReminders },
+            )
+            MesListItem(
+                headline = "Уведомления",
+                supporting = if (enabled.isEmpty()) "Выключены" else enabled.joinToString(", ").replaceFirstChar(Char::uppercase),
+                icon = Icons.Rounded.NotificationsActive,
+                onClick = onOpenNotifications,
+                shape = groupShape(0, 1),
+            )
+        }
 
         item { SectionHeader("Безопасность", Modifier.padding(top = 12.dp)) }
         group(security)
+
+        item { SectionHeader("Данные", Modifier.padding(top = 12.dp)) }
+        item {
+            MesListItem(
+                headline = "Кэш и офлайн",
+                supporting = if (settings.cacheEnabled) "Включён · разделы и период данных" else "Выключен",
+                icon = Icons.Rounded.Storage,
+                onClick = onOpenCache,
+                shape = groupShape(0, 1),
+            )
+        }
 
         item { SectionHeader("О приложении", Modifier.padding(top = 12.dp)) }
         item {
@@ -259,13 +240,13 @@ fun SettingsScreen(viewModel: MoreViewModel) {
 }
 
 /** Слитная группа строк; [offset] — сколько элементов группы уже выведено выше. */
-private fun LazyListScope.group(rows: List<@Composable (Shape) -> Unit>, offset: Int = 0) {
+internal fun LazyListScope.group(rows: List<@Composable (Shape) -> Unit>, offset: Int = 0) {
     val total = rows.size + offset
     itemsIndexed(rows) { index, row -> row(groupShape(index + offset, total)) }
 }
 
 @Composable
-private fun SwitchItem(
+internal fun SwitchItem(
     icon: ImageVector,
     title: String,
     subtitle: String?,

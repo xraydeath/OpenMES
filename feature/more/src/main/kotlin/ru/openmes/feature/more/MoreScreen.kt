@@ -20,6 +20,7 @@ import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
 import androidx.compose.material.icons.automirrored.rounded.Logout
 import androidx.compose.material.icons.rounded.AccountBalance
 import androidx.compose.material.icons.rounded.Badge
+import androidx.compose.material.icons.rounded.DoorFront
 import androidx.compose.material.icons.rounded.BakeryDining
 import androidx.compose.material.icons.rounded.Balance
 import androidx.compose.material.icons.rounded.Book
@@ -102,6 +103,7 @@ fun MoreScreen(
     viewModel: MoreViewModel,
     onOpenSettings: () -> Unit,
     onOpenAttendance: () -> Unit,
+    onOpenVisits: () -> Unit,
     onOpenStudentCard: () -> Unit,
     onOpenFood: () -> Unit,
     onOpenNews: () -> Unit,
@@ -115,6 +117,7 @@ fun MoreScreen(
 
     val available = listOf(
         Service(Icons.Rounded.SportsScore, "Посещаемость", "Пропуски с начала учебного года", onOpenAttendance),
+        Service(Icons.Rounded.DoorFront, "Проходы", "Турникеты: приход, уход, время в колледже", onOpenVisits),
         Service(Icons.Rounded.Badge, "Студенческий билет", "Электронный билет колледжа", onOpenStudentCard),
         Service(Icons.Rounded.BakeryDining, "Питание", "Меню столовой и буфета", onOpenFood),
         Service(Icons.Rounded.Campaign, "Новости", "Лента school.mos.ru", onOpenNews),

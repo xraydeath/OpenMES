@@ -21,7 +21,7 @@ import java.util.concurrent.TimeUnit
 
 /**
  * Раз в час (при наличии сети) подтягивает основные данные, чтобы офлайн-кэш
- * был свежим. Диапазоны — те же, что у экранов, иначе ключи кэша не совпадут.
+ * был свежим (выключается в настройках кэша). Диапазоны — те же, что у экранов, иначе ключи кэша не совпадут.
  */
 class CacheRefreshWorker(
     context: Context,
@@ -49,10 +49,14 @@ class CacheRefreshWorker(
             { diaryRepository.getHomeworks(childId, today.minusDays(2), today.plusDays(14)) },
             { diaryRepository.getAttendance(childId, yearStart, today) },
             { diaryRepository.getStudentCard(childId) },
-            { diaryRepository.getDayKinds(childId, yearStart, yearStart.plusYears(1).minusDays(1)) },
+            { diaryRepository.getCalendar(childId, yearStart, yearStart.plusYears(1).minusDays(1)) },
+            { diaryRepository.getLessonModules(childId) },
+            { diaryRepository.getTestLessons(childId, today, today.plusDays(30)) },
         )
         // Каждый запрос сам по себе: одна упавшая ручка не мешает обновить остальные.
         val failed = calls.count { call -> runCatching { call() }.isFailure }
+        ru.openmes.app.widget.ScheduleWidget.refresh(applicationContext)
+        runCatching { ru.openmes.app.notify.LessonReminders.reschedule(applicationContext) }
         return if (failed == calls.size) Result.retry() else Result.success()
     }
 
@@ -67,6 +71,10 @@ class CacheRefreshWorker(
                 .build()
             WorkManager.getInstance(context)
                 .enqueueUniquePeriodicWork(WORK_NAME, ExistingPeriodicWorkPolicy.KEEP, request)
+        }
+
+        fun cancel(context: Context) {
+            WorkManager.getInstance(context).cancelUniqueWork(WORK_NAME)
         }
     }
 }

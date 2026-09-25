@@ -88,6 +88,7 @@ import ru.openmes.feature.homework.HomeworkScreen
 import ru.openmes.feature.homework.openLibrary
 import ru.openmes.feature.marks.MarksScreen
 import ru.openmes.feature.more.AttendanceScreen
+import ru.openmes.feature.more.VisitsScreen
 import ru.openmes.feature.more.FoodScreen
 import ru.openmes.feature.more.NewsDetailScreen
 import ru.openmes.feature.more.NewsScreen
@@ -95,6 +96,10 @@ import ru.openmes.feature.more.ProforientationScreen
 import ru.openmes.feature.more.SchoolInfoScreen
 import ru.openmes.feature.more.MoreScreen
 import ru.openmes.feature.more.SettingsScreen
+import ru.openmes.feature.more.CacheSettingsScreen
+import ru.openmes.feature.more.NotificationSettingsScreen
+import ru.openmes.app.notify.EveningReminders
+import ru.openmes.app.notify.LessonReminders
 import ru.openmes.feature.more.StudentCardScreen
 import ru.openmes.feature.schedule.ScheduleScreen
 
@@ -119,6 +124,7 @@ private val screenTitles = mapOf(
     "homework" to "Домашние задания",
     "more" to "Ещё",
     "attendance" to "Посещаемость",
+    "visits" to "Проходы",
     "student_card" to "Студенческий билет",
     "food" to "Питание",
     "news" to "Новости",
@@ -126,6 +132,8 @@ private val screenTitles = mapOf(
     "school_info" to "О колледже",
     "proforientation" to "Профориентация",
     "settings" to "Настройки",
+    "cache_settings" to "Кэш и офлайн",
+    "notification_settings" to "Уведомления",
 )
 
 private val authRoutes = setOf("login")
@@ -247,6 +255,7 @@ fun AppNavHost() {
                         viewModel = koinViewModel(),
                         onOpenSettings = { navController.navigate("settings") },
                         onOpenAttendance = { navController.navigate("attendance") },
+                        onOpenVisits = { navController.navigate("visits") },
                         onOpenStudentCard = { navController.navigate("student_card") },
                         onOpenFood = { navController.navigate("food") },
                         onOpenNews = { navController.navigate("news") },
@@ -258,6 +267,10 @@ fun AppNavHost() {
 
                 composable("attendance") {
                     AttendanceScreen(viewModel = koinViewModel())
+                }
+
+                composable("visits") {
+                    VisitsScreen(viewModel = koinViewModel())
                 }
 
                 composable("student_card") {
@@ -292,7 +305,24 @@ fun AppNavHost() {
                 }
 
                 composable("settings") {
-                    SettingsScreen(viewModel = koinViewModel())
+                    SettingsScreen(
+                        viewModel = koinViewModel(),
+                        onOpenCache = { navController.navigate("cache_settings") },
+                        onOpenNotifications = { navController.navigate("notification_settings") },
+                    )
+                }
+
+                composable("notification_settings") {
+                    val context = LocalContext.current
+                    NotificationSettingsScreen(
+                        viewModel = koinViewModel(),
+                        onPreviewLesson = { LessonReminders.showPreview(context) },
+                        onCheckEvening = { EveningReminders.runNow(context) },
+                    )
+                }
+
+                composable("cache_settings") {
+                    CacheSettingsScreen(viewModel = koinViewModel())
                 }
             }
           }

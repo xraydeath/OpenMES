@@ -113,4 +113,56 @@ class OfflineCacheTest {
         assertTrue(dir.listFiles()!!.none { it.name.endsWith(".tmp") })
         assertEquals(2, dir.listFiles()!!.size) // exact + alias
     }
+    private val profile = "https://school.mos.ru/api/family/mobile/v1/profile?x=1"
+
+    @Test
+    fun `выключенный раздел не пишется и не читается`() {
+        cache.policy = CachePolicy(sections = CacheSection.entries.toSet() - CacheSection.HOMEWORK)
+        client.get(homeworks)
+        assertTrue(dir.listFiles().orEmpty().isEmpty())
+        online = false
+        assertEquals(504, cacheOnlyClient.get(homeworks).first)
+    }
+
+    @Test
+    fun `выключенный кэш сохраняет только профиль для входа`() {
+        cache.policy = CachePolicy(enabled = false)
+        client.get(homeworks)
+        client.get(profile)
+        assertEquals(504, cacheOnlyClient.get(homeworks).first)
+        assertEquals(200, cacheOnlyClient.get(profile).first)
+    }
+
+    @Test
+    fun `cleanup стирает выключенные разделы`() {
+        client.get(homeworks)
+        client.get(profile)
+        cache.policy = CachePolicy(enabled = false)
+        cache.cleanup()
+        assertTrue(dir.listFiles()!!.all { it.name.startsWith("session_") })
+        assertEquals(200, cacheOnlyClient.get(profile).first)
+    }
+
+    @Test
+    fun `данные вне периода не сохраняются`() {
+        cache.policy = CachePolicy(windowDays = 30)
+        val today = java.time.LocalDate.now()
+        val old = "https://school.mos.ru/api/family/mobile/v1/homeworks/short?student_id=1" +
+            "&from=${today.minusDays(90)}&to=${today.minusDays(60)}"
+        client.get(old)
+        assertTrue(dir.listFiles().orEmpty().isEmpty())
+        val recent = "https://school.mos.ru/api/family/mobile/v1/homeworks/short?student_id=1" +
+            "&from=${today.minusDays(40)}&to=${today.plusDays(3)}"
+        client.get(recent)
+        assertEquals(200, cacheOnlyClient.get(recent).first)
+    }
+
+    @Test
+    fun `ручная очистка оставляет профиль для входа`() {
+        client.get(homeworks)
+        client.get(profile)
+        cache.clear(keepSession = true)
+        assertEquals(504, cacheOnlyClient.get(homeworks).first)
+        assertEquals(200, cacheOnlyClient.get(profile).first)
+    }
 }

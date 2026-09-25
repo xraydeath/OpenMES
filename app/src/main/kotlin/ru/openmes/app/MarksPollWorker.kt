@@ -1,16 +1,6 @@
 package ru.openmes.app
 
-import android.Manifest
-import android.app.NotificationChannel
-import android.app.NotificationManager
-import android.app.PendingIntent
 import android.content.Context
-import android.content.Intent
-import android.content.pm.PackageManager
-import android.os.Build
-import androidx.core.app.NotificationCompat
-import androidx.core.app.NotificationManagerCompat
-import androidx.core.content.ContextCompat
 import androidx.core.content.edit
 import androidx.work.Constraints
 import androidx.work.CoroutineWorker
@@ -23,6 +13,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withTimeoutOrNull
 import org.koin.core.component.KoinComponent
 import org.koin.core.component.inject
+import ru.openmes.app.notify.Notifications
 import ru.openmes.core.data.DiaryRepository
 import ru.openmes.core.data.Session
 import ru.openmes.core.data.SessionRepository
@@ -80,34 +71,15 @@ class MarksPollWorker(
     }
 
     private fun notify(id: Int, title: String, text: String) {
-        val context = applicationContext
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
-            ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) !=
-            PackageManager.PERMISSION_GRANTED
-        ) {
-            return
-        }
-        ensureChannel(context)
-        val intent = PendingIntent.getActivity(
-            context,
-            0,
-            Intent(context, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
-            PendingIntent.FLAG_IMMUTABLE,
-        )
-        val notification = NotificationCompat.Builder(context, CHANNEL_ID)
-            .setSmallIcon(R.drawable.ic_stat_mark)
+        val builder = Notifications.builder(applicationContext, Notifications.Channel.MARKS)
             .setContentTitle(title)
             .setContentText(text)
-            .setContentIntent(intent)
-            .setAutoCancel(true)
-            .setGroup(CHANNEL_ID)
-            .build()
-        NotificationManagerCompat.from(context).notify(id, notification)
+            .setGroup(Notifications.Channel.MARKS.id)
+        Notifications.post(applicationContext, id, builder)
     }
 
     companion object {
         private const val WORK_NAME = "marks_poll"
-        private const val CHANNEL_ID = "data_update"
         private const val PREFS = "marks_poll"
         private const val KEY_MARKS_PREFIX = "known_marks_"
         private const val MAX_NOTIFICATIONS = 10
@@ -126,14 +98,6 @@ class MarksPollWorker(
             WorkManager.getInstance(context).cancelUniqueWork(WORK_NAME)
             // При повторном включении — снова начать с базы, без лавины старых оценок.
             context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit { clear() }
-        }
-
-        private fun ensureChannel(context: Context) {
-            val manager = context.getSystemService(NotificationManager::class.java)
-            if (manager.getNotificationChannel(CHANNEL_ID) != null) return
-            manager.createNotificationChannel(
-                NotificationChannel(CHANNEL_ID, "Новые оценки", NotificationManager.IMPORTANCE_DEFAULT),
-            )
         }
     }
 }

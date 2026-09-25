@@ -13,10 +13,13 @@ import okhttp3.ResponseBody.Companion.toResponseBody
 import java.io.File
 import java.io.IOException
 import java.security.MessageDigest
+import java.time.LocalDate
 
 /**
  * Офлайн-кэш ответов МЭШ: удачные GET-ответы пишутся на диск, а без сети (или при 5xx)
  * отдаются из кэша. [offlineDataTime] — время сохранения показанных данных, пока сети нет.
+ * Что и сколько хранить — [policy] (настройки пользователя); файлы названы по разделу
+ * («marks_exact_…»), чтобы выключенный раздел можно было стереть целиком.
  */
 class OfflineCache(private val dir: File) {
 
@@ -26,6 +29,9 @@ class OfflineCache(private val dir: File) {
     val offlineDataTime: StateFlow<Long?> = _offlineDataTime.asStateFlow()
 
     private val lock = Any()
+
+    @Volatile
+    var policy: CachePolicy = CachePolicy()
 
     internal fun read(key: String): Pair<Long, String>? = synchronized(lock) {
         val file = File(dir, key)
@@ -58,28 +64,58 @@ class OfflineCache(private val dir: File) {
         _offlineDataTime.value = _offlineDataTime.value?.let { minOf(it, savedAt) } ?: savedAt
     }
 
-    /** Двоичные данные вне HTTP-кэша (QR билета, аватар): тоже стираются при выходе. */
+    /** Двоичные данные вне HTTP-кэша (QR билета, аватар) — раздел [CacheSection.PROFILE]. */
     fun readBlob(name: String): ByteArray? = synchronized(lock) {
-        runCatching { File(dir, blobName(name)).takeIf { it.exists() }?.readBytes() }.getOrNull()
+        if (!policy.allows(CacheSection.PROFILE)) return null
+        runCatching {
+            File(dir, blobName(name)).takeIf { it.exists() }?.readBytes()
+        }.getOrNull()
     }
 
-    fun writeBlob(name: String, bytes: ByteArray) = synchronized(lock) {
-        runCatching {
-            dir.mkdirs()
-            val tmp = File(dir, blobName(name) + ".tmp")
-            tmp.writeBytes(bytes)
-            tmp.renameTo(File(dir, blobName(name)))
+    fun writeBlob(name: String, bytes: ByteArray) {
+        if (!policy.allows(CacheSection.PROFILE)) return
+        synchronized(lock) {
+            runCatching {
+                dir.mkdirs()
+                val tmp = File(dir, blobName(name) + ".tmp")
+                tmp.writeBytes(bytes)
+                tmp.renameTo(File(dir, blobName(name)))
+            }
         }
     }
 
-    private fun blobName(name: String) = "blob_" + name.replace(Regex("[^A-Za-z0-9_-]"), "_")
+    private fun blobName(name: String) =
+        CacheSection.PROFILE.key + "_blob_" + name.replace(Regex("[^A-Za-z0-9_-]"), "_")
 
-    /** Очистка при выходе из аккаунта. */
-    fun clear() = synchronized(lock) {
-        dir.listFiles()?.forEach { it.delete() }
+    /** Очистка при выходе из аккаунта (или вручную: [keepSession] оставляет профиль для входа без сети). */
+    fun clear(keepSession: Boolean = false) = synchronized(lock) {
+        dir.listFiles()
+            ?.filter { !keepSession || sectionOf(it.name) != CacheSection.SESSION }
+            ?.forEach { it.delete() }
         _offlineDataTime.value = null
     }
 
+    /**
+     * Приведение диска к [policy]: удаляет выключенные разделы и файлы старого формата
+     * (без раздела в имени). Вызывать не с главного потока.
+     */
+    fun cleanup() = synchronized(lock) {
+        val current = policy
+        dir.listFiles()?.forEach { file ->
+            val section = sectionOf(file.name)
+            if (section == null || !current.allows(section)) file.delete()
+        }
+    }
+
+    fun stats(): CacheStats = synchronized(lock) {
+        val files = dir.listFiles().orEmpty()
+        CacheStats(files = files.size, bytes = files.sumOf { it.length() })
+    }
+
+    private fun sectionOf(fileName: String): CacheSection? =
+        CacheSection.entries.firstOrNull { fileName.startsWith(it.key + "_") }
+
+    /** Свежий ответ перезаписывает старый по тому же ключу; копятся лишь неактуальные ключи — их вытесняет лимит. */
     private fun prune() {
         val files = dir.listFiles() ?: return
         if (files.size <= MAX_ENTRIES) return
@@ -104,14 +140,14 @@ class OfflineCacheInterceptor(
 
     override fun intercept(chain: Interceptor.Chain): Response {
         val request = chain.request()
-        val path = request.url.encodedPath.removePrefix("/")
-        val cacheable = request.method == "GET" && CACHED_PATHS.any { path.startsWith(it) }
-        if (cacheOnly) return cachedResponse(request, cacheable) ?: notCached(request)
-        if (!cacheable) return chain.proceed(request)
-        val exactKey = exactKey(request)
-        val aliasKey = aliasKey(request)
+        // null — ответ не кэшируется: чужой путь, не GET или раздел выключен в настройках.
+        val section = sectionOf(request)?.takeIf { cache.policy.allows(it) }
+        if (cacheOnly) return section?.let { cachedResponse(request, it) } ?: notCached(request)
+        if (section == null) return chain.proceed(request)
+        val exactKey = exactKey(request, section)
+        val aliasKey = aliasKey(request, section)
 
-        fun fromCache(): Response? = cachedResponse(request, cacheable = true)?.also {
+        fun fromCache(): Response? = cachedResponse(request, section)?.also {
             cache.onServedFromCache(it.sentRequestAtMillis)
         }
 
@@ -133,23 +169,39 @@ class OfflineCacheInterceptor(
         val body = response.body ?: return response
         val contentType = body.contentType()
         if (contentType?.subtype?.contains("json") != true) return response
+        if (!inWindow(request.url, cache.policy.windowDays)) return response
         val bytes = body.bytes()
         cache.write(listOfNotNull(exactKey, aliasKey), bytes.decodeToString(), System.currentTimeMillis())
         return response.newBuilder().body(bytes.toResponseBody(contentType)).build()
     }
 
-    private fun exactKey(request: Request): String = key("exact", request.url.toString())
+    private fun sectionOf(request: Request): CacheSection? =
+        if (request.method == "GET") CacheSection.of(request.url.encodedPath.removePrefix("/")) else null
+
+    private fun exactKey(request: Request, section: CacheSection): String =
+        key(section, "exact", request.url.toString())
 
     /** Для «плавающих» диапазонов (оценки за 28 дней, ДЗ на две недели) — ключ без дат. */
-    private fun aliasKey(request: Request): String? {
+    private fun aliasKey(request: Request, section: CacheSection): String? {
         val path = request.url.encodedPath.removePrefix("/")
-        return if (EXACT_ONLY.none { path.startsWith(it) }) key("alias", alias(request.url)) else null
+        return if (EXACT_ONLY.none { path.startsWith(it) }) key(section, "alias", alias(request.url)) else null
+    }
+
+    /** Диапазон дат запроса задевает ±[windowDays] от сегодня (запросы без дат проходят всегда). */
+    private fun inWindow(url: HttpUrl, windowDays: Int?): Boolean {
+        if (windowDays == null) return true
+        val dates = url.queryParameterNames
+            .flatMap { url.queryParameterValues(it) }
+            .mapNotNull { value -> value?.takeIf(DATE::matches)?.let { runCatching { LocalDate.parse(it.take(10)) }.getOrNull() } }
+        if (dates.isEmpty()) return true
+        val today = LocalDate.now()
+        return dates.max() >= today.minusDays(windowDays.toLong()) && dates.min() <= today.plusDays(windowDays.toLong())
     }
 
     /** Ответ из кэша; время сохранения — в sentRequestAtMillis. */
-    private fun cachedResponse(request: Request, cacheable: Boolean): Response? {
-        if (!cacheable) return null
-        val (savedAt, body) = cache.read(exactKey(request)) ?: aliasKey(request)?.let(cache::read) ?: return null
+    private fun cachedResponse(request: Request, section: CacheSection): Response? {
+        val (savedAt, body) = cache.read(exactKey(request, section))
+            ?: aliasKey(request, section)?.let(cache::read) ?: return null
         return Response.Builder()
             .request(request)
             .protocol(Protocol.HTTP_1_1)
@@ -177,34 +229,12 @@ class OfflineCacheInterceptor(
         }
     }
 
-    private fun key(prefix: String, value: String): String =
-        prefix + "_" + MessageDigest.getInstance("SHA-256").digest(value.toByteArray())
+    private fun key(section: CacheSection, prefix: String, value: String): String =
+        section.key + "_" + prefix + "_" + MessageDigest.getInstance("SHA-256").digest(value.toByteArray())
             .joinToString("") { "%02x".format(it) }
 
     private companion object {
         val DATE = Regex("""\d{4}-\d{2}-\d{2}.*""")
-
-        val CACHED_PATHS = listOf(
-            "api/family/mobile/v1/profile",
-            "acl/api/users/profile_info",
-            "api/eventcalendar/v1/api/events",
-            "api/family/mobile/v1/lesson_schedule_items/",
-            "api/family/mobile/v1/marks",
-            "api/family/mobile/v1/subject_marks",
-            "api/family/mobile/v1/homeworks",
-            "api/family/mobile/v1/attestation",
-            "api/family/mobile/v1/attendance",
-            "api/family/mobile/v1/student-card",
-            "api/family/mobile/v1/school_info",
-            "api/news/v2/news",
-            "portfolio/app/persons/",
-            "api/family/mobile/v1/periods_schedules",
-            "api/ej/core/family/v1/academic_years",
-            "api/avatarmanagement/v1/",
-            "api/food/meals/v3/menu/",
-            "api/food/meals/v3/clients/balance",
-            "api/food/meals/v3/clients/food-provider",
-        )
 
         /** Расписание по месяцам: чужой месяц вместо нужного показывать нельзя. */
         val EXACT_ONLY = listOf(
@@ -213,6 +243,8 @@ class OfflineCacheInterceptor(
             "api/family/mobile/v1/marks/",
             "api/food/meals/v3/menu/",
             "api/news/v2/news",
+            "api/ej/plan/family/v1/test_lessons/",
+            "api/pass/entrances/",
         )
     }
 }

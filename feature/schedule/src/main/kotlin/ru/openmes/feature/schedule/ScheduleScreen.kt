@@ -48,6 +48,17 @@ import androidx.compose.material.icons.rounded.Healing
 import androidx.compose.material.icons.rounded.MeetingRoom
 import androidx.compose.material.icons.rounded.Person
 import androidx.compose.material.icons.rounded.School
+import androidx.compose.material.icons.rounded.Videocam
+import androidx.compose.material.icons.rounded.EventNote
+import androidx.compose.material.icons.rounded.PictureAsPdf
+import androidx.compose.material.icons.rounded.Quiz
+import androidx.compose.material3.IconButton
+import android.content.Context
+import android.content.Intent
+import android.widget.Toast
+import androidx.core.content.FileProvider
+import ru.openmes.core.model.DayInfo
+import java.io.File
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalIconButton
@@ -104,6 +115,7 @@ import ru.openmes.core.designsystem.components.StatusPill
 import ru.openmes.core.designsystem.components.groupShape
 import ru.openmes.core.designsystem.components.markShape
 import ru.openmes.core.designsystem.components.markTone
+import ru.openmes.core.designsystem.components.openUrl
 import ru.openmes.core.designsystem.components.rememberPressMorphShape
 import ru.openmes.core.model.DayKind
 import ru.openmes.core.model.Lesson
@@ -115,6 +127,7 @@ import java.time.LocalTime
 import java.time.temporal.ChronoUnit
 import java.time.temporal.TemporalAdjusters
 import kotlin.math.abs
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.foundation.pager.PagerState
 import androidx.compose.animation.rememberSplineBasedDecay
@@ -212,6 +225,16 @@ fun ScheduleScreen(viewModel: ScheduleViewModel) {
         }
     }
 
+    val context = LocalContext.current
+    // PDF недели выбранного дня: открыть просмотрщиком (или поделиться, если его нет).
+    fun exportPdf(date: LocalDate) {
+        val monday = date.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY))
+        viewModel.exportWeekPdf(monday, File(context.cacheDir, "exports")) { result ->
+            result.onSuccess { file -> context.openPdf(file) }
+                .onFailure { Toast.makeText(context, "Не удалось получить PDF: ${it.message}", Toast.LENGTH_LONG).show() }
+        }
+    }
+
     MesPullToRefreshBox(
         isRefreshing = state.refreshing,
         onRefresh = viewModel::refresh,
@@ -241,8 +264,12 @@ fun ScheduleScreen(viewModel: ScheduleViewModel) {
                         lessons = state.lessonsFor(date),
                         loading = state.loading && state.months.isEmpty(),
                         dayKind = state.dayKind(date),
+                        dayInfo = state.dayInfo(date),
                         onLessonClick = viewModel::openLessonDetails,
-                        statusOf = { viewModel.detailsById[it.id.toLongOrNull()]?.diseaseStatusType },
+                        detailsOf = { viewModel.detailsById[it.id.toLongOrNull()] },
+                        isTest = { state.testFor(it) != null },
+                        pdfBusy = viewModel.pdfExporting,
+                        onPdf = { exportPdf(date) },
                     )
                 }
             }
@@ -528,20 +555,24 @@ private fun DayPage(
     lessons: List<Lesson>,
     loading: Boolean,
     dayKind: DayKind,
+    dayInfo: DayInfo?,
     onLessonClick: (Lesson) -> Unit,
-    statusOf: (Lesson) -> String?,
+    detailsOf: (Lesson) -> LessonDetails?,
+    isTest: (Lesson) -> Boolean,
+    pdfBusy: Boolean,
+    onPdf: () -> Unit,
 ) {
     when {
         loading -> LoadingState()
         lessons.isEmpty() -> Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp)) {
-            DayHeader(date, lessons.size)
+            DayHeader(date, lessons.size, pdfBusy = pdfBusy, onPdf = onPdf)
             EmptyState(
                 icon = Icons.Rounded.EventBusy,
                 title = "Уроков нет",
-                subtitle = when (dayKind) {
-                    DayKind.VACATION -> "Каникулы"
+                subtitle = dayInfo?.note ?: when (dayKind) {
+                    DayKind.VACATION -> dayInfo?.title ?: "Каникулы"
                     DayKind.HOLIDAY -> "Выходной"
-                    DayKind.WORKDAY -> "Занятий в этот день нет"
+                    DayKind.WORKDAY -> dayInfo?.title?.takeUnless { it.isTheory() } ?: "Занятий в этот день нет"
                 },
             )
         }
@@ -550,9 +581,22 @@ private fun DayPage(
             modifier = Modifier.fillMaxSize(),
             contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 24.dp),
         ) {
-            item(key = "day_header") { DayHeader(date, lessons.size) }
+            item(key = "day_header") { DayHeader(date, lessons.size, pdfBusy = pdfBusy, onPdf = onPdf) }
+            // Перенос или особый период (практика) — плашкой над уроками.
+            val banner = dayInfo?.note ?: dayInfo?.title?.takeUnless { it.isTheory() }
+            if (banner != null) {
+                item(key = "day_banner") {
+                    StatusPill(
+                        text = banner,
+                        icon = Icons.Rounded.EventNote,
+                        containerColor = MaterialTheme.colorScheme.tertiaryContainer,
+                        contentColor = MaterialTheme.colorScheme.onTertiaryContainer,
+                        modifier = Modifier.padding(bottom = 12.dp),
+                    )
+                }
+            }
             item(key = "day_lessons") {
-                LessonsGroup(lessons, isToday = date == today, onLessonClick = onLessonClick, statusOf = statusOf)
+                LessonsGroup(lessons, isToday = date == today, onLessonClick = onLessonClick, detailsOf = detailsOf, isTest = isTest)
             }
         }
     }
@@ -560,7 +604,7 @@ private fun DayPage(
 
 /** «23 сентября, среда» + число уроков. */
 @Composable
-private fun DayHeader(date: LocalDate, count: Int) {
+private fun DayHeader(date: LocalDate, count: Int, pdfBusy: Boolean, onPdf: () -> Unit) {
     Row(
         Modifier
             .fillMaxWidth()
@@ -585,7 +629,32 @@ private fun DayHeader(date: LocalDate, count: Int) {
                 contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
             )
         }
+        IconButton(onClick = onPdf, enabled = !pdfBusy) {
+            if (pdfBusy) {
+                LoadingIndicator(Modifier.size(24.dp))
+            } else {
+                Icon(Icons.Rounded.PictureAsPdf, contentDescription = "Расписание недели в PDF")
+            }
+        }
     }
+}
+
+/** «Теоретическое обучение» — обычный учебный день, отдельно его не показываем. */
+private fun String.isTheory() = startsWith("Теоретическ", ignoreCase = true)
+
+private fun Context.openPdf(file: File) {
+    val uri = FileProvider.getUriForFile(this, "$packageName.files", file)
+    val view = Intent(Intent.ACTION_VIEW).setDataAndType(uri, "application/pdf")
+        .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+    val share = Intent.createChooser(
+        Intent(Intent.ACTION_SEND).setType("application/pdf").putExtra(Intent.EXTRA_STREAM, uri)
+            .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION),
+        "Расписание",
+    )
+    // Просмотрщика PDF может не быть — тогда хотя бы поделиться файлом.
+    runCatching { startActivity(view) }
+        .recoverCatching { startActivity(share) }
+        .onFailure { Toast.makeText(this, "Нет приложения для PDF", Toast.LENGTH_LONG).show() }
 }
 
 /** Слитые карточки уроков с перерывами между ними (стиль OctoDiary DayItem). */
@@ -594,7 +663,8 @@ private fun LessonsGroup(
     lessons: List<Lesson>,
     isToday: Boolean,
     onLessonClick: (Lesson) -> Unit,
-    statusOf: (Lesson) -> String?,
+    detailsOf: (Lesson) -> LessonDetails?,
+    isTest: (Lesson) -> Boolean,
 ) {
     // Номера — только у плановых уроков.
     val planNumbers = remember(lessons) {
@@ -625,11 +695,14 @@ private fun LessonsGroup(
                     val lesson = row.lesson
                     val current = isToday && lesson.startTime != null && lesson.endTime != null &&
                         now >= lesson.startTime && now < lesson.endTime
+                    val details = detailsOf(lesson)
                     LessonCard(
                         lesson = lesson,
                         number = planNumbers[row.index],
                         current = current,
-                        status = statusOf(lesson),
+                        status = details?.diseaseStatusType,
+                        distance = lesson.isDistance || details?.isDistance == true,
+                        test = isTest(lesson),
                         shape = shape,
                         onClick = { onLessonClick(lesson) },
                     )
@@ -669,6 +742,8 @@ private fun LessonCard(
     number: Int?,
     current: Boolean,
     status: String?,
+    distance: Boolean,
+    test: Boolean,
     shape: Shape,
     onClick: () -> Unit,
 ) {
@@ -721,7 +796,11 @@ private fun LessonCard(
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
                 )
-                val meta = listOfNotNull(lesson.lessonForm?.trim(), lesson.room).joinToString(" · ")
+                val meta = listOfNotNull(
+                    lesson.lessonForm?.trim(),
+                    "Дистанционно".takeIf { distance },
+                    lesson.room,
+                ).joinToString(" · ")
                 if (meta.isNotEmpty()) {
                     Text(meta, style = MaterialTheme.typography.bodySmall, color = secondary)
                 }
@@ -742,6 +821,22 @@ private fun LessonCard(
                     horizontalArrangement = Arrangement.spacedBy(4.dp),
                 ) {
                     if (status != null) DiseaseStatusIcon(status)
+                    if (test) {
+                        Icon(
+                            Icons.Rounded.Quiz,
+                            contentDescription = "Контрольное занятие",
+                            modifier = Modifier.size(16.dp),
+                            tint = colors.error,
+                        )
+                    }
+                    if (distance) {
+                        Icon(
+                            Icons.Rounded.Videocam,
+                            contentDescription = "Дистанционное занятие",
+                            modifier = Modifier.size(16.dp),
+                            tint = secondary,
+                        )
+                    }
                     if (lesson.homework != null) {
                         Icon(
                             Icons.AutoMirrored.Rounded.MenuBook,
@@ -798,7 +893,9 @@ private fun lessonsWord(n: Int): String = when {
 
 @Composable
 private fun LessonDetailsSheet(details: LessonDetails, loading: Boolean) {
+    val context = LocalContext.current
     val info = listOfNotNull(
+        details.module?.let { Triple(Icons.Rounded.EventNote, "Модуль / тема", it) },
         details.teacherName?.let { Triple(Icons.Rounded.Person, "Преподаватель", it) },
         details.room?.let { Triple(Icons.Rounded.MeetingRoom, "Кабинет", it) },
         details.building?.let { Triple(Icons.Rounded.Apartment, "Корпус", it) },
@@ -852,6 +949,36 @@ private fun LessonDetailsSheet(details: LessonDetails, loading: Boolean) {
                     contentColor = content,
                     modifier = Modifier.padding(bottom = 8.dp),
                 )
+            }
+
+            // Дистанционное занятие: плашка и кнопка подключения
+            if (details.isDistance) {
+                StatusPill(
+                    text = "Дистанционное занятие",
+                    icon = Icons.Rounded.Videocam,
+                    containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                    contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+                    modifier = Modifier.padding(bottom = 8.dp),
+                )
+            }
+            details.testName?.let { name ->
+                StatusPill(
+                    text = name,
+                    icon = Icons.Rounded.Quiz,
+                    containerColor = MaterialTheme.colorScheme.errorContainer,
+                    contentColor = MaterialTheme.colorScheme.onErrorContainer,
+                    modifier = Modifier.padding(bottom = 8.dp),
+                )
+            }
+            details.joinUrl?.let { url ->
+                FilledTonalButton(
+                    onClick = { context.openUrl(url) },
+                    modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
+                ) {
+                    Icon(Icons.Rounded.Videocam, contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
+                    Spacer(Modifier.width(ButtonDefaults.IconSpacing))
+                    Text("Подключиться к занятию")
+                }
             }
 
             info.forEachIndexed { index, (icon, label, value) ->

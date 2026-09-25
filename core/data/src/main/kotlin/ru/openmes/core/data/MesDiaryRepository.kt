@@ -3,7 +3,12 @@ package ru.openmes.core.data
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import ru.openmes.core.common.runSuspendCatching
+import ru.openmes.core.model.DayInfo
 import ru.openmes.core.model.DayKind
+import ru.openmes.core.model.LessonModule
+import ru.openmes.core.model.TestLesson
+import ru.openmes.core.model.Visit
+import ru.openmes.core.model.VisitDay
 import ru.openmes.core.model.AcademicYear
 import ru.openmes.core.model.AbsenceReason
 import ru.openmes.core.model.AttendanceEntry
@@ -77,6 +82,8 @@ class MesDiaryRepository(
                 start = runCatching { LocalDate.parse(dto.beginDate.orEmpty()) }.getOrDefault(LocalDate.now()),
                 end = runCatching { LocalDate.parse(dto.endDate.orEmpty()) }.getOrDefault(LocalDate.now()),
                 periods = emptyList(),
+                calendarId = dto.calendarId,
+                isCurrent = dto.currentYear,
             )
         }
     }
@@ -396,21 +403,134 @@ class MesDiaryRepository(
             homework = dto.lessonHomeworks.firstOrNull()?.homework,
             homeworkDone = dto.lessonHomeworks.firstOrNull()?.isDone ?: false,
             marks = dto.marks.map { Mark(id = it.id.toString(), value = it.value, weight = it.weight) },
+            isDistance = dto.isVirtual || dto.remoteLesson != null,
         )
     }
 
-    override suspend fun getDayKinds(personId: String, from: LocalDate, to: LocalDate): Map<LocalDate, DayKind> = apiCall {
-        mesApi.getPeriodsSchedules(studentId = studentId(), from = from.format(isoDate), to = to.format(isoDate))
+    override suspend fun getCalendar(personId: String, from: LocalDate, to: LocalDate): Map<LocalDate, DayInfo> = apiCall {
+        val days = mesApi.getPeriodsSchedules(studentId = studentId(), from = from.format(isoDate), to = to.format(isoDate))
             .mapNotNull { day ->
-                val date = runCatching { LocalDate.parse(day.date.take(10)) }.getOrNull() ?: return@mapNotNull null
+                val date = parseDate(day.date) ?: return@mapNotNull null
                 val kind = when (day.type) {
                     "holiday" -> DayKind.HOLIDAY
                     "vacation" -> DayKind.VACATION
                     else -> DayKind.WORKDAY
                 }
-                date to kind
+                date to DayInfo(kind = kind, title = day.title?.takeIf { it.isNotBlank() })
             }
-            .toMap()
+            .toMap(HashMap())
+        // Переносы — дополнение: без них календарь всё равно полезен.
+        runSuspendCatching { transpositions() }.getOrNull().orEmpty().forEach { t ->
+            val date = parseDate(t.date) ?: return@forEach
+            if (date.isBefore(from) || date.isAfter(to)) return@forEach
+            val postponed = parseDate(t.postponedFrom)
+            val weekday = t.scheduleForWeekday?.takeIf { it in 1..7 }?.let { java.time.DayOfWeek.of(it) }
+            // Обычное воскресенье без пояснений — не перенос, а просто выходной.
+            val trivial = t.isHoliday && t.note.isNullOrBlank() && postponed == null && weekday == null &&
+                date.dayOfWeek == java.time.DayOfWeek.SUNDAY
+            val note = if (trivial) null else buildString {
+                append(if (t.isHoliday) "Выходной день" else "Рабочий день")
+                weekday?.let { append(" по расписанию ").append(WEEKDAY_GEN[it.value - 1]) }
+                postponed?.let { append(", перенос с ").append(it.format(SHORT_DATE)) }
+                t.note?.takeIf { it.isNotBlank() }?.let { append(" — ").append(it.trim()) }
+            }
+            val old = days[date]
+            val kind = when {
+                !t.isHoliday -> DayKind.WORKDAY
+                old?.kind == DayKind.VACATION -> DayKind.VACATION
+                else -> DayKind.HOLIDAY
+            }
+            days[date] = DayInfo(kind = kind, title = old?.title, note = note ?: old?.note)
+        }
+        days
+    }
+
+    private suspend fun currentYear() = mesApi.getAcademicYears().let { years ->
+        years.firstOrNull { it.currentYear } ?: years.maxByOrNull { it.id }
+    }
+
+    private suspend fun transpositions() =
+        currentYear()?.calendarId?.let { mesApi.getCalendarTranspositions(it) }.orEmpty()
+
+    override suspend fun getLessonModules(personId: String): List<LessonModule> = apiCall {
+        val year = currentYear() ?: return@apiCall emptyList()
+        mesApi.getLessonModules(studentProfileId = studentId(), academicYearId = year.id).map { dto ->
+            LessonModule(
+                id = dto.id,
+                name = dto.name,
+                subjectId = dto.subjectId,
+                start = dto.startDate.toLocalDate(),
+                end = dto.endDate.toLocalDate(),
+            )
+        }
+    }
+
+    private fun List<Int>?.toLocalDate(): LocalDate? =
+        this?.takeIf { it.size >= 3 }?.let { runCatching { LocalDate.of(it[0], it[1], it[2]) }.getOrNull() }
+
+    override suspend fun getTestLessons(personId: String, from: LocalDate, to: LocalDate): List<TestLesson> = apiCall {
+        val tokens = tokenStore.load() ?: error("Нет сессии")
+        val personGuid = tokens.personGuid ?: return@apiCall emptyList()
+        mesApi.getTestLessons(
+            studentProfileId = studentId(),
+            studentPersonId = personGuid,
+            from = from.format(isoDate),
+            to = to.format(isoDate),
+        ).items.orEmpty().map { it.toTestLesson() }
+    }
+
+    /** Схема элементов test_lessons у колледжа не подтверждена: берём первое подходящее поле. */
+    private fun kotlinx.serialization.json.JsonObject.toTestLesson(): TestLesson {
+        fun str(vararg keys: String): String? = keys.firstNotNullOfOrNull { key ->
+            (this[key] as? kotlinx.serialization.json.JsonPrimitive)?.takeIf { it !is kotlinx.serialization.json.JsonNull }
+                ?.content?.takeIf { it.isNotBlank() }
+        }
+        fun nested(obj: String, key: String): String? =
+            ((this[obj] as? kotlinx.serialization.json.JsonObject)?.get(key) as? kotlinx.serialization.json.JsonPrimitive)
+                ?.takeIf { it !is kotlinx.serialization.json.JsonNull }?.content
+        return TestLesson(
+            date = parseDate(str("date", "lesson_date", "begin_date", "start_at", "begin_time")),
+            lessonId = str("schedule_item_id", "lesson_schedule_item_id", "lesson_id", "id")?.toLongOrNull(),
+            subjectId = (str("subject_id") ?: nested("subject", "id"))?.toLongOrNull(),
+            subjectName = str("subject_name") ?: nested("subject", "name"),
+            name = str("test_form_name", "control_form_name", "lesson_type_name", "name", "title")
+                ?: nested("control_form", "name") ?: nested("test_form", "name"),
+        )
+    }
+
+    override suspend fun getVisits(personId: String, from: LocalDate, to: LocalDate): List<VisitDay> = apiCall {
+        val tokens = tokenStore.load() ?: error("Нет сессии")
+        val personGuid = tokens.personGuid ?: error("Нет профиля — войдите заново")
+        // Сервис отдаёт не больше 7 дней за запрос.
+        generateSequence(from) { it.plusDays(7) }.takeWhile { !it.isAfter(to) }.toList()
+            .flatMap { chunkStart ->
+                val chunkEnd = minOf(chunkStart.plusDays(6), to)
+                mesApi.getVisitDurations(personGuid, chunkStart.format(isoDate), chunkEnd.format(isoDate)).payload
+            }
+            .mapNotNull { day ->
+                val date = parseDate(day.date) ?: return@mapNotNull null
+                VisitDay(
+                    date = date,
+                    visits = day.visits.map {
+                        Visit(
+                            entered = parseTime(it.entered),
+                            left = parseTime(it.left),
+                            duration = it.duration,
+                            place = it.organizationShortName ?: it.kindName,
+                            incomplete = it.isIncomplete,
+                        )
+                    },
+                )
+            }
+            .sortedByDescending { it.date }
+    }
+
+    override suspend fun getSchedulePdf(personId: String, from: LocalDate, to: LocalDate): ByteArray = apiCall {
+        val tokens = tokenStore.load() ?: error("Нет сессии")
+        val personIds = tokens.personGuid ?: tokens.studentId ?: error("Нет профиля — войдите заново")
+        withContext(Dispatchers.IO) {
+            mesApi.getSchedulePdf(personIds, from.format(isoDate), to.format(isoDate)).use { it.bytes() }
+        }
     }
 
     // -------------------------------------------------------------------
@@ -433,6 +553,7 @@ class MesDiaryRepository(
             startTime = startDateTime?.toLocalTime(),
             endTime = endDateTime?.toLocalTime(),
             subjectName = subjectName,
+            subjectId = subjectId,
             room = listOfNotNull(roomName, roomNumber).joinToString(" · ").ifBlank { null },
             teacherName = lessonForm?.name, // «Практическое занятие» / «Теоретическое занятие»
             marks = marks.map { Mark(id = "${id}_${it.value}", value = it.value, weight = it.weight) },
@@ -445,7 +566,8 @@ class MesDiaryRepository(
                     materialsCount = hw.totalCount,
                 )
             },
-            isDistance = linkToJoin != null,
+            isDistance = !linkToJoin.isNullOrBlank(),
+            joinUrl = linkToJoin?.takeIf { it.isNotBlank() },
             source = source,
             lessonForm = lessonForm?.name,
         )
@@ -461,6 +583,12 @@ class MesDiaryRepository(
         }.getOrNull()
     }
 }
+
+private val WEEKDAY_GEN = listOf(
+    "понедельника", "вторника", "среды", "четверга", "пятницы", "субботы", "воскресенья",
+)
+
+private val SHORT_DATE: DateTimeFormatter = DateTimeFormatter.ofPattern("dd.MM")
 
 /** Первая ссылка в теле ответа-редиректа (href="…" или голый URL). */
 private val LINK_IN_BODY = Regex("""[a-zA-Z][a-zA-Z0-9+.-]*://[^\s"'<>]+""")
