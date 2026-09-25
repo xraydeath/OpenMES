@@ -82,4 +82,10 @@ interface DiaryRepository {
 
     /** URL текущего аватара (null — аватар не загружен). */
     suspend fun getAvatarUrl(personGuid: String): String?
+
+    /** Картинка аватара из сети (сохраняется на диск); null — аватара нет. */
+    suspend fun getAvatar(personGuid: String): ByteArray?
+
+    /** Последний сохранённый аватар — для мгновенного показа. */
+    suspend fun getSavedAvatar(personGuid: String): ByteArray?
 }

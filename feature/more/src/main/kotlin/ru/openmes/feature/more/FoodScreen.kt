@@ -36,7 +36,6 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
-import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.launchIn
@@ -96,7 +95,7 @@ class FoodViewModel(
 
     init {
         sessionRepository.session
-            .onEach { if (it is Session.LoggedIn) refresh() }
+            .onEach { if (it is Session.LoggedIn) load(force = false) }
             .launchIn(viewModelScope)
     }
 
@@ -115,35 +114,66 @@ class FoodViewModel(
             loading = cached == null,
             error = null,
         )
-        if (cached == null) refresh()
+        if (cached == null) load(force = false)
     }
 
-    fun refresh() {
+    /** Pull-to-refresh: мимо кэша в памяти. */
+    fun refresh() = load(force = true)
+
+    private fun load(force: Boolean) {
         viewModelScope.launch {
             val monday = _state.value.monday
+            val sunday = monday.plusDays(6)
             _state.value = _state.value.copy(loading = true, error = null)
-            // Баланс — второстепенный: его ошибка не мешает показу меню.
-            val balance = async { runSuspendCatching { foodRepository.getBalance() }.getOrNull() }
-            val provider = async {
-                _state.value.provider ?: runSuspendCatching { foodRepository.getProvider() }.getOrNull()
+            // Баланс и оператор — второстепенные и независимые: подставляются, как только придут,
+            // меню их не ждёт.
+            launch {
+                runSuspendCatching { foodRepository.getBalance() }.getOrNull()
+                    ?.let { _state.value = _state.value.copy(balance = it) }
             }
-            runSuspendCatching { foodRepository.getMenu(monday, monday.plusDays(6)) }
+            if (_state.value.provider == null) {
+                launch {
+                    runSuspendCatching { foodRepository.getProvider(force) }.getOrNull()
+                        ?.let { _state.value = _state.value.copy(provider = it) }
+                }
+            }
+            // Сначала — сохранённое меню (мгновенно), затем свежее из сети.
+            if (_state.value.days.isEmpty()) {
+                foodRepository.cachedOnly {
+                    Triple(getMenu(monday, sunday, force = true), getBalance(), getProvider(force = true))
+                }?.let { (days, balance, provider) ->
+                    val s = _state.value
+                    if (s.monday == monday && s.days.isEmpty()) {
+                        _state.value = s.copy(
+                            days = days.associateBy { it.date },
+                            balance = s.balance ?: balance,
+                            provider = s.provider ?: provider,
+                        )
+                    }
+                }
+            }
+            runSuspendCatching { foodRepository.getMenu(monday, sunday, force) }
                 .onSuccess { days ->
                     val byDate = days.associateBy { it.date }
                     weeks[monday] = byDate
                     if (_state.value.monday != monday) return@onSuccess
-                    _state.value = _state.value.copy(
-                        days = byDate,
-                        balance = balance.await() ?: _state.value.balance,
-                        provider = provider.await(),
-                        loading = false,
-                    )
+                    _state.value = _state.value.copy(days = byDate, loading = false)
+                    prefetchWeek(monday.plusWeeks(1))
                 }
                 .onFailure { e ->
                     if (_state.value.monday == monday) {
                         _state.value = _state.value.copy(loading = false, error = e.message)
                     }
                 }
+        }
+    }
+
+    /** Следующая неделя — заранее, чтобы листание было без ожидания. */
+    private fun prefetchWeek(monday: LocalDate) {
+        if (monday in weeks) return
+        viewModelScope.launch {
+            runSuspendCatching { foodRepository.getMenu(monday, monday.plusDays(6)) }
+                .onSuccess { days -> weeks[monday] = days.associateBy { it.date } }
         }
     }
 }
@@ -174,7 +204,8 @@ fun FoodScreen(viewModel: FoodViewModel) {
             modifier = Modifier.fillMaxSize(),
         ) {
             when {
-                state.error != null -> ScrollableFill { ErrorState(onRetry = viewModel::refresh, details = state.error) }
+                // Ошибка сети не прячет уже показанное (сохранённое) меню.
+                state.error != null && state.days.isEmpty() -> ScrollableFill { ErrorState(onRetry = viewModel::refresh, details = state.error) }
                 state.loading && state.days.isEmpty() -> LoadingState()
                 else -> LazyColumn(
                     modifier = Modifier.fillMaxSize(),

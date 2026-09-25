@@ -5,6 +5,7 @@ import okhttp3.OkHttpClient
 import okhttp3.logging.HttpLoggingInterceptor
 import org.koin.core.module.Module
 import org.koin.core.qualifier.named
+import org.koin.core.scope.Scope
 import org.koin.dsl.module
 import retrofit2.Retrofit
 import retrofit2.converter.kotlinx.serialization.asConverterFactory
@@ -25,6 +26,9 @@ val AuthHttpClient = named("authHttpClient")
 
 /** MesApi, который читает только офлайн-кэш (без сети) — для мгновенного показа сохранённых данных. */
 val CachedMesApi = named("cachedMesApi")
+val CachedMealsApi = named("cachedMealsApi")
+val CachedPortalApi = named("cachedPortalApi")
+private val CachedHttpClient = named("cachedHttpClient")
 
 val networkModule: Module = module {
 
@@ -143,17 +147,21 @@ val networkModule: Module = module {
             .create(PortalApi::class.java)
     }
 
-    single<MesApi>(CachedMesApi) {
-        Retrofit.Builder()
-            .baseUrl(MesEnvironment.SCHOOL_BASE_URL)
-            .client(
-                get<OkHttpClient>(BaseHttpClient).newBuilder()
-                    .apply { interceptors().clear() }
-                    .addInterceptor(OfflineCacheInterceptor(get(), cacheOnly = true))
-                    .build(),
-            )
-            .addConverterFactory(get<kotlinx.serialization.json.Json>().asConverterFactory("application/json".toMediaType()))
+    // Клиент только по офлайн-кэшу, без сети: мгновенный показ сохранённого до загрузки.
+    single(CachedHttpClient) {
+        get<OkHttpClient>(BaseHttpClient).newBuilder()
+            .apply { interceptors().clear() }
+            .addInterceptor(OfflineCacheInterceptor(get(), cacheOnly = true))
             .build()
-            .create(MesApi::class.java)
     }
+
+    single<MesApi>(CachedMesApi) { cachedRetrofit().create(MesApi::class.java) }
+    single<MealsApi>(CachedMealsApi) { cachedRetrofit().create(MealsApi::class.java) }
+    single<PortalApi>(CachedPortalApi) { cachedRetrofit().create(PortalApi::class.java) }
 }
+
+private fun Scope.cachedRetrofit(): Retrofit = Retrofit.Builder()
+    .baseUrl(MesEnvironment.SCHOOL_BASE_URL)
+    .client(get<OkHttpClient>(CachedHttpClient))
+    .addConverterFactory(get<kotlinx.serialization.json.Json>().asConverterFactory("application/json".toMediaType()))
+    .build()

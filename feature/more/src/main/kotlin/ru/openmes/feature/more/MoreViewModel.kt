@@ -22,7 +22,6 @@ import ru.openmes.core.data.Session
 import ru.openmes.core.data.SessionRepository
 import ru.openmes.core.data.SettingsRepository
 import ru.openmes.core.data.ThemeMode
-import java.net.URL
 
 class MoreViewModel(
     private val sessionRepository: SessionRepository,
@@ -47,17 +46,17 @@ class MoreViewModel(
         }
     }
 
-    /** Без Coil (тянет новый Compose): качаем байты и декодируем сами. */
+    /** Сохранённый аватар показывается сразу, затем обновляется из сети. */
     private suspend fun loadAvatar(personGuid: String?) {
         _avatar.value = null
         if (personGuid == null) return
-        _avatar.value = runSuspendCatching {
-            val url = diaryRepository.getAvatarUrl(personGuid) ?: return@runSuspendCatching null
-            withContext(Dispatchers.IO) {
-                val bytes = URL(url).openStream().use { it.readBytes() }
-                BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.asImageBitmap()
-            }
-        }.getOrNull()
+        _avatar.value = diaryRepository.getSavedAvatar(personGuid)?.decodeBitmap()
+        runSuspendCatching { diaryRepository.getAvatar(personGuid) }
+            .onSuccess { bytes -> _avatar.value = bytes?.decodeBitmap() }
+    }
+
+    private suspend fun ByteArray.decodeBitmap(): ImageBitmap? = withContext(Dispatchers.Default) {
+        BitmapFactory.decodeByteArray(this@decodeBitmap, 0, size)?.asImageBitmap()
     }
 
     fun selectChild(personId: String) = viewModelScope.launch {

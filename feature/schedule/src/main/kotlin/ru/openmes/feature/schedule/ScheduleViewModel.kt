@@ -142,8 +142,13 @@ class ScheduleViewModel(
         childId ?: return
         val today = LocalDate.now()
         val yearStart = LocalDate.of(if (today.monthValue >= 9) today.year else today.year - 1, 9, 1)
+        val yearEnd = yearStart.plusYears(1).minusDays(1)
         viewModelScope.launch {
-            runSuspendCatching { diaryRepository.getDayKinds(childId, yearStart, yearStart.plusYears(1).minusDays(1)) }
+            // Сначала сохранённый календарь (мгновенно), затем свежий из сети.
+            diaryRepository.cachedOnly { getDayKinds(childId, yearStart, yearEnd) }?.let { kinds ->
+                if (loadedChildId == childId && _state.value.dayKinds.isEmpty()) _state.update { it.copy(dayKinds = kinds) }
+            }
+            runSuspendCatching { diaryRepository.getDayKinds(childId, yearStart, yearEnd) }
                 .onSuccess { kinds -> if (loadedChildId == childId) _state.update { it.copy(dayKinds = kinds) } }
         }
     }
@@ -217,6 +222,12 @@ class ScheduleViewModel(
         ids.forEach { lessonId ->
             detailsInFlight += lessonId
             viewModelScope.launch {
+                // Сохранённые детали видны сразу, сеть их затем обновит.
+                if (lessonId !in _detailsById) {
+                    diaryRepository.cachedOnly { getLessonDetails(childId, lessonId) }?.let {
+                        if (loadedChildId == childId && lessonId !in _detailsById) _detailsById[lessonId] = it
+                    }
+                }
                 detailsPermits.withPermit {
                     runSuspendCatching { diaryRepository.getLessonDetails(childId, lessonId) }
                         .onSuccess { if (loadedChildId == childId) _detailsById[lessonId] = it }
@@ -250,16 +261,16 @@ class ScheduleViewModel(
         inFlight += month
         _state.update { it.copy(loading = true, error = null) }
         viewModelScope.launch {
-            // Месяц может быть тяжёлым для eventcalendar (503 под нагрузкой):
-            // фолбэк — грузим двумя половинами месяца.
-            val lessons = runSuspendCatching {
-                diaryRepository.getSchedule(childId, month.atDay(1), month.atEndOfMonth())
-            }.recoverCatching {
-                val mid = month.atDay(15)
-                val first = diaryRepository.getSchedule(childId, month.atDay(1), mid)
-                val second = diaryRepository.getSchedule(childId, mid.plusDays(1), month.atEndOfMonth())
-                first + second
-            }.getOrNull()
+            // Холодный старт: сначала месяц из офлайн-кэша (мгновенно), сеть обновит его ниже.
+            if (!_state.value.months.containsKey(month)) {
+                diaryRepository.cachedOnly { getMonth(childId, month) }?.let { cached ->
+                    if (loadedChildId == childId && !_state.value.months.containsKey(month)) {
+                        _state.update { it.withMonths(it.months + (month to cached)) }
+                        prefetchDetails()
+                    }
+                }
+            }
+            val lessons = runSuspendCatching { diaryRepository.getMonth(childId, month) }.getOrNull()
 
             if (loadedChildId != childId) return@launch
             inFlight -= month
@@ -285,6 +296,18 @@ class ScheduleViewModel(
         }
     }
 }
+
+/**
+ * Месяц может быть тяжёлым для eventcalendar (503 под нагрузкой):
+ * фолбэк — грузим двумя половинами месяца.
+ */
+private suspend fun DiaryRepository.getMonth(childId: String, month: YearMonth): List<Lesson> =
+    runSuspendCatching { getSchedule(childId, month.atDay(1), month.atEndOfMonth()) }
+        .recoverCatching {
+            val mid = month.atDay(15)
+            getSchedule(childId, month.atDay(1), mid) + getSchedule(childId, mid.plusDays(1), month.atEndOfMonth())
+        }
+        .getOrThrow()
 
 /** Быстрое переключение между приложениями не должно каждый раз дёргать МЭШ. */
 private const val FOREGROUND_REFRESH_GAP_MS = 30_000L

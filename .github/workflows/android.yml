@@ -3,7 +3,6 @@ name: Build
 on:
   push:
     branches: [main]
-    tags: ["v*"]
   pull_request:
   workflow_dispatch:
 
@@ -44,7 +43,9 @@ jobs:
           SIGNING_KEY_PASSWORD: ${{ secrets.SIGNING_KEY_PASSWORD }}
         run: |
           ./gradlew :app:assembleRelease
-          mv app/build/outputs/apk/release/app-release.apk "OpenMES-0.1.0-build.$BUILD_NUMBER.apk"
+          VERSION=$(sed -n 's/.*versionName = "\(.*\)".*/\1/p' app/build.gradle.kts)
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+          mv app/build/outputs/apk/release/app-release.apk "OpenMES-$VERSION.apk"
 
       - name: Upload APK
         uses: actions/upload-artifact@v7
@@ -52,22 +53,16 @@ jobs:
           name: OpenMES-apk
           path: OpenMES-*.apk
 
-      # Каждый пуш в main — релиз «Сборка N»; тег v* — именованный релиз.
-      - name: Publish build release
+      # Релиз на каждую версию: тег v<версия>, название — просто версия.
+      # Повторный пуш с той же версией обновляет APK в уже созданном релизе.
+      - name: Publish release
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: softprops/action-gh-release@v3
         with:
-          tag_name: build-${{ github.run_number }}
+          tag_name: v${{ env.VERSION }}
           target_commitish: ${{ github.sha }}
-          name: Сборка ${{ github.run_number }}
+          name: ${{ env.VERSION }}
           files: OpenMES-*.apk
-          generate_release_notes: true
-          make_latest: true
-
-      - name: Publish tagged release
-        if: startsWith(github.ref, 'refs/tags/v')
-        uses: softprops/action-gh-release@v3
-        with:
-          files: OpenMES-*.apk
+          overwrite_files: true
           generate_release_notes: true
           make_latest: true

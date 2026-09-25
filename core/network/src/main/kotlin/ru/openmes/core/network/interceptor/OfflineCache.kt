@@ -58,6 +58,22 @@ class OfflineCache(private val dir: File) {
         _offlineDataTime.value = _offlineDataTime.value?.let { minOf(it, savedAt) } ?: savedAt
     }
 
+    /** Двоичные данные вне HTTP-кэша (QR билета, аватар): тоже стираются при выходе. */
+    fun readBlob(name: String): ByteArray? = synchronized(lock) {
+        runCatching { File(dir, blobName(name)).takeIf { it.exists() }?.readBytes() }.getOrNull()
+    }
+
+    fun writeBlob(name: String, bytes: ByteArray) = synchronized(lock) {
+        runCatching {
+            dir.mkdirs()
+            val tmp = File(dir, blobName(name) + ".tmp")
+            tmp.writeBytes(bytes)
+            tmp.renameTo(File(dir, blobName(name)))
+        }
+    }
+
+    private fun blobName(name: String) = "blob_" + name.replace(Regex("[^A-Za-z0-9_-]"), "_")
+
     /** Очистка при выходе из аккаунта. */
     fun clear() = synchronized(lock) {
         dir.listFiles()?.forEach { it.delete() }
@@ -187,6 +203,7 @@ class OfflineCacheInterceptor(
             "api/avatarmanagement/v1/",
             "api/food/meals/v3/menu/",
             "api/food/meals/v3/clients/balance",
+            "api/food/meals/v3/clients/food-provider",
         )
 
         /** Расписание по месяцам: чужой месяц вместо нужного показывать нельзя. */

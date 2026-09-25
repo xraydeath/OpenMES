@@ -85,6 +85,12 @@ class AttendanceViewModel(
             val today = LocalDate.now()
             // С начала учебного года (1 сентября).
             val yearStart = LocalDate.of(if (today.monthValue >= 9) today.year else today.year - 1, 9, 1)
+            // Сначала — сохранённое (мгновенно), затем свежее из сети.
+            if (_state.value.days.isEmpty()) {
+                diaryRepository.cachedOnly { getAttendance(childId, yearStart, today) }?.let { days ->
+                    if (_state.value.days.isEmpty()) _state.value = _state.value.copy(days = days.filter { it.lessons.isNotEmpty() })
+                }
+            }
             runSuspendCatching { diaryRepository.getAttendance(childId, yearStart, today) }
                 .onSuccess { days ->
                     _state.value = AttendanceUiState(days = days.filter { it.lessons.isNotEmpty() }, loading = false)
@@ -112,7 +118,7 @@ fun AttendanceScreen(viewModel: AttendanceViewModel) {
         modifier = Modifier.fillMaxSize(),
     ) {
         when {
-            state.error != null -> ScrollableFill { ErrorState(onRetry = viewModel::refresh, details = state.error) }
+            state.error != null && state.days.isEmpty() -> ScrollableFill { ErrorState(onRetry = viewModel::refresh, details = state.error) }
             state.loading && state.days.isEmpty() -> LoadingState()
             state.days.isEmpty() -> ScrollableFill {
                 EmptyState(

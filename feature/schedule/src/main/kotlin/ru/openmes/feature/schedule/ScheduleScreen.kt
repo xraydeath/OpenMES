@@ -32,7 +32,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.pager.HorizontalPager
-import androidx.compose.foundation.pager.PagerDefaults
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -53,6 +52,16 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.Icon
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.SizeTransform
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.scaleOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.togetherWith
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.fadeIn
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.LoadingIndicator
 import androidx.compose.material3.MaterialShapes
@@ -60,7 +69,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.material3.toShape
 import androidx.compose.runtime.Composable
@@ -107,6 +115,12 @@ import java.time.LocalTime
 import java.time.temporal.ChronoUnit
 import java.time.temporal.TemporalAdjusters
 import kotlin.math.abs
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.foundation.pager.PagerState
+import androidx.compose.animation.rememberSplineBasedDecay
+import androidx.compose.foundation.gestures.snapping.snapFlingBehavior
+import androidx.compose.foundation.gestures.snapping.SnapLayoutInfoProvider
+import androidx.compose.foundation.gestures.TargetedFlingBehavior
 
 private val MONTHS_GEN = mapOf(
     1 to "января", 2 to "февраля", 3 to "марта", 4 to "апреля",
@@ -160,16 +174,26 @@ fun ScheduleScreen(viewModel: ScheduleViewModel) {
         }
     }
 
+    // Дата, выбранная самим пейджером: к ней не нужно ехать программно.
+    val pagerDate = remember { mutableStateOf<LocalDate?>(null) }
+
     // Пейджер остановился → выбрать дату (подгрузить месяц).
     LaunchedEffect(pagerState.settledPage) {
         val page = pagerState.settledPage
-        if (!syncing && page in days.indices) viewModel.selectDate(days[page])
+        if (!syncing && page in days.indices) {
+            pagerDate.value = days[page]
+            viewModel.selectDate(days[page])
+        }
     }
     // Выбор даты (день в WeekBar, «К сегодня») → проскроллить пейджер.
     // collectLatest: новая дата отменяет недоехавший переход и сразу едет дальше с текущего места —
     // без проверок «идёт ли прокрутка», из-за которых выбор терялся и страница застревала между днями.
     LaunchedEffect(pagerState) {
         snapshotFlow { selectedDate }.collectLatest { date ->
+            // Выбор пришёл от свайпа: страница уже там, а если палец успел начать следующий свайп —
+            // «доводка» к этой дате отменяла бы его (быстрые свайпы подряд откатывались назад).
+            if (date == pagerDate.value) return@collectLatest
+            pagerDate.value = null
             val index = days.indexOf(date)
             if (index < 0 || (pagerState.currentPage == index && pagerState.currentPageOffsetFraction == 0f)) return@collectLatest
             syncing = true
@@ -206,7 +230,7 @@ fun ScheduleScreen(viewModel: ScheduleViewModel) {
                 state.error != null -> ScrollableFill { ErrorState(onRetry = viewModel::refresh, details = state.error) }
                 else -> HorizontalPager(
                     state = pagerState,
-                    flingBehavior = PagerDefaults.flingBehavior(pagerState, snapAnimationSpec = PageSlideSpec, snapPositionalThreshold = PageSwipeThreshold),
+                    flingBehavior = rememberShortSwipeFling(pagerState),
                     // Без key — ключи вызывали ANR (грабли из OctoDiary-kt).
                     modifier = Modifier.fillMaxSize(),
                 ) { page ->
@@ -229,8 +253,48 @@ fun ScheduleScreen(viewModel: ScheduleViewModel) {
 /** Плавный сдвиг страницы без пружинного «отскока». */
 private val PageSlideSpec = tween<Float>(durationMillis = 450, easing = FastOutSlowInEasing)
 
-// Доля ширины страницы, после которой медленный свайп листает дальше (по умолчанию 0.5).
-private const val PageSwipeThreshold = 0.4f
+// Доля ширины страницы, после которой свайп листает дальше, даже если палец остановился перед
+// отпусканием (у PagerDefaults — 0.5, в коротком свайпе столько не набирается).
+private const val PageSwipeThreshold = 0.12f
+
+// Скорость, с которой отпущенный палец считается свайпом на соседнюю страницу. У PagerDefaults она
+// зашита в 400 dp/с: короткий свайп не дотягивал и страница возвращалась назад.
+private val PageFlingVelocity = 80.dp
+
+/**
+ * Листание ровно на одну страницу. Решает направление: страница, сдвинутая хоть на [PageSwipeThreshold],
+ * уезжает дальше, если её не бросили обратно; без сдвига достаточно быстрого короткого свайпа.
+ */
+@Composable
+private fun rememberShortSwipeFling(state: PagerState): TargetedFlingBehavior {
+    val minVelocity = with(LocalDensity.current) { PageFlingVelocity.toPx() }
+    val decay = rememberSplineBasedDecay<Float>()
+    return remember(state, minVelocity, decay) {
+        val provider = object : SnapLayoutInfoProvider {
+            override fun calculateApproachOffset(velocity: Float, decayOffset: Float) = 0f
+
+            override fun calculateSnapOffset(velocity: Float): Float {
+                val pageSize = state.layoutInfo.pageSize + state.layoutInfo.pageSpacing
+                if (pageSize == 0) return 0f
+                val position = state.currentPage + state.currentPageOffsetFraction
+                val from = state.settledPage
+                val dragged = position - from
+                val target = when {
+                    // Бросок обратно отменяет перелистывание.
+                    dragged > 0 && velocity < -minVelocity -> from
+                    dragged < 0 && velocity > minVelocity -> from
+                    dragged > PageSwipeThreshold -> from + 1
+                    dragged < -PageSwipeThreshold -> from - 1
+                    velocity > minVelocity -> from + 1
+                    velocity < -minVelocity -> from - 1
+                    else -> from
+                }.coerceIn(from - 1, from + 1).coerceIn(0, state.pageCount - 1)
+                return (target - position) * pageSize
+            }
+        }
+        snapFlingBehavior(provider, decay, PageSlideSpec)
+    }
+}
 
 private const val WEEKS_AROUND = 13
 private const val WEEK_COUNT = WEEKS_AROUND * 2 + 1
@@ -291,24 +355,55 @@ private fun WeekBar(
                     Text(title, style = MaterialTheme.typography.titleMediumEmphasized)
                 }
                 val thisWeek = weekOf(today)
-                // Место под кнопку есть всегда: её появление не сдвигает полосу дней и расписание.
+                // Под заголовком всегда одна строка той же высоты: на сегодняшнем дне — подпись,
+                // в стороне от него — кнопка возврата со стрелкой в сторону сегодняшнего дня.
+                val shownWeek = weekPager.targetPage
+                val direction = when {
+                    shownWeek != thisWeek -> if (shownWeek > thisWeek) -1 else 1
+                    selected != today -> if (selected > today) -1 else 1
+                    else -> 0
+                }
                 Box(Modifier.height(28.dp), contentAlignment = Alignment.Center) {
-                    val showToday = weekPager.targetPage != thisWeek || selected != today
-                    val todayAlpha by animateFloatAsState(if (showToday) 1f else 0f, tween(150), label = "today_btn")
-                    TextButton(
-                        onClick = {
-                            onSelect(today)
-                            // Сегодня уже выбрано, но полоса пролистана на другую неделю — вернуть её.
-                            scope.launch { weekPager.animateScrollToPage(thisWeek, animationSpec = PageSlideSpec) }
+                    AnimatedContent(
+                        targetState = direction,
+                        // Кнопка «выезжает» со стороны своей стрелки и слегка пружинит; подпись просто гаснет.
+                        transitionSpec = {
+                            val side = if (targetState != 0) targetState else -initialState
+                            val enter = fadeIn(tween(180)) + scaleIn(
+                                spring(dampingRatio = 0.6f, stiffness = Spring.StiffnessMediumLow),
+                                initialScale = 0.7f,
+                            ) + slideInHorizontally(tween(220, easing = FastOutSlowInEasing)) { side * it / 3 }
+                            val exit = fadeOut(tween(120)) + scaleOut(tween(120), targetScale = 0.85f)
+                            (enter togetherWith exit).using(SizeTransform(clip = false))
                         },
-                        enabled = showToday,
-                        shapes = ButtonDefaults.shapes(),
-                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp),
-                        modifier = Modifier
-                            .height(28.dp)
-                            .graphicsLayer { alpha = todayAlpha },
-                    ) {
-                        Text("К сегодня", style = MaterialTheme.typography.labelMedium)
+                        label = "today_btn",
+                    ) { dir ->
+                        if (dir == 0) {
+                            Text(
+                                "эта неделя",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        } else {
+                            FilledTonalButton(
+                                onClick = {
+                                    onSelect(today)
+                                    // Сегодня уже выбрано, но полоса пролистана на другую неделю — вернуть её.
+                                    scope.launch { weekPager.animateScrollToPage(thisWeek, animationSpec = PageSlideSpec) }
+                                },
+                                shapes = ButtonDefaults.shapes(),
+                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp),
+                                modifier = Modifier.height(28.dp),
+                            ) {
+                                if (dir < 0) {
+                                    Icon(Icons.AutoMirrored.Rounded.KeyboardArrowLeft, contentDescription = null, Modifier.size(18.dp))
+                                }
+                                Text("Сегодня", style = MaterialTheme.typography.labelMedium)
+                                if (dir > 0) {
+                                    Icon(Icons.AutoMirrored.Rounded.KeyboardArrowRight, contentDescription = null, Modifier.size(18.dp))
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -323,7 +418,7 @@ private fun WeekBar(
         HorizontalPager(
             state = weekPager,
             modifier = Modifier.padding(top = 4.dp),
-            flingBehavior = PagerDefaults.flingBehavior(weekPager, snapAnimationSpec = PageSlideSpec, snapPositionalThreshold = PageSwipeThreshold),
+            flingBehavior = rememberShortSwipeFling(weekPager),
         ) { week ->
             val monday = firstMonday.plusWeeks(week.toLong())
             Row(
@@ -507,47 +602,64 @@ private fun LessonsGroup(
         lessons.map { if (it.source == null || it.source == "PLAN") ++n else null }
     }
     val now = remember { LocalTime.now() }
+    // Перемены — полноширинные строки той же слитной группы, что и уроки.
+    val rows = remember(lessons) {
+        buildList {
+            lessons.forEachIndexed { index, lesson ->
+                val prev = lessons.getOrNull(index - 1)
+                if (prev?.endTime != null && lesson.startTime != null) {
+                    val gap = Duration.between(prev.endTime, lesson.startTime).toMinutes()
+                    if (gap > 0) add(ScheduleRow.Break(gap))
+                }
+                add(ScheduleRow.LessonRow(lesson, index))
+            }
+        }
+    }
 
     Column(verticalArrangement = Arrangement.spacedBy(GroupGap)) {
-        lessons.forEachIndexed { index, lesson ->
-            // Перерыв между уроками
-            if (index > 0) {
-                val prev = lessons[index - 1]
-                val gap = if (prev.endTime != null && lesson.startTime != null) {
-                    Duration.between(prev.endTime, lesson.startTime).toMinutes()
-                } else {
-                    0
+        rows.forEachIndexed { rowIndex, row ->
+            val shape = groupShape(rowIndex, rows.size)
+            when (row) {
+                is ScheduleRow.Break -> BreakRow(row.minutes, shape)
+                is ScheduleRow.LessonRow -> {
+                    val lesson = row.lesson
+                    val current = isToday && lesson.startTime != null && lesson.endTime != null &&
+                        now >= lesson.startTime && now < lesson.endTime
+                    LessonCard(
+                        lesson = lesson,
+                        number = planNumbers[row.index],
+                        current = current,
+                        status = statusOf(lesson),
+                        shape = shape,
+                        onClick = { onLessonClick(lesson) },
+                    )
                 }
-                if (gap > 0) BreakDivider(gap)
             }
-            val current = isToday && lesson.startTime != null && lesson.endTime != null &&
-                now >= lesson.startTime && now < lesson.endTime
-            LessonCard(
-                lesson = lesson,
-                number = planNumbers[index],
-                current = current,
-                status = statusOf(lesson),
-                shape = groupShape(index, lessons.size),
-                onClick = { onLessonClick(lesson) },
-            )
         }
     }
 }
 
+private sealed interface ScheduleRow {
+    data class LessonRow(val lesson: Lesson, val index: Int) : ScheduleRow
+    data class Break(val minutes: Long) : ScheduleRow
+}
+
 @Composable
-private fun BreakDivider(minutes: Long) {
-    Box(
-        Modifier
-            .fillMaxWidth()
-            .padding(vertical = 4.dp),
-        contentAlignment = Alignment.Center,
+private fun BreakRow(minutes: Long, shape: Shape) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = shape,
+        color = MaterialTheme.colorScheme.surfaceContainerLow,
+        contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
     ) {
-        StatusPill(
-            text = "перемена $minutes мин",
-            icon = Icons.Rounded.Coffee,
-            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-            contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
+        Row(
+            Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
+        ) {
+            Icon(Icons.Rounded.Coffee, contentDescription = null, modifier = Modifier.size(16.dp))
+            Text("Перемена $minutes мин", style = MaterialTheme.typography.labelLarge)
+        }
     }
 }
 

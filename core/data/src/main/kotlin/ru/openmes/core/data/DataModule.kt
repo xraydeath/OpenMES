@@ -3,7 +3,9 @@ package ru.openmes.core.data
 import org.koin.android.ext.koin.androidContext
 import org.koin.core.module.Module
 import org.koin.dsl.module
+import ru.openmes.core.network.CachedMealsApi
 import ru.openmes.core.network.CachedMesApi
+import ru.openmes.core.network.CachedPortalApi
 import ru.openmes.core.network.api.MealsApi
 import ru.openmes.core.network.api.MeshAuthApi
 import ru.openmes.core.network.api.MesApi
@@ -35,10 +37,17 @@ val dataModule: Module = module {
     }
 
     single<DiaryRepository> {
-        MesDiaryRepository(get(), get(), cached = MesDiaryRepository(get(CachedMesApi), get()))
+        MesDiaryRepository(get(), get(), offlineCache = get(), cached = MesDiaryRepository(get(CachedMesApi), get()))
     }
 
-    single<FoodRepository> { MealsFoodRepository(get<MealsApi>(), get()) }
+    single<FoodRepository> {
+        MealsFoodRepository(get<MealsApi>(), get(), cached = MealsFoodRepository(get(CachedMealsApi), get()))
+    }
 
-    single<CollegeRepository> { MesCollegeRepository(get<MesApi>(), get<PortalApi>(), get()) }
+    single<CollegeRepository> {
+        MesCollegeRepository(
+            get<MesApi>(), get<PortalApi>(), get(), offlineCache = get(),
+            cached = MesCollegeRepository(get(CachedMesApi), get(CachedPortalApi), get()),
+        )
+    }
 }

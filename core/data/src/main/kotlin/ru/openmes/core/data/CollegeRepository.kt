@@ -1,5 +1,8 @@
 package ru.openmes.core.data
 
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import ru.openmes.core.common.runSuspendCatching
 import ru.openmes.core.model.NewsBlock
 import ru.openmes.core.model.NewsItem
 import ru.openmes.core.model.NewsPage
@@ -13,6 +16,7 @@ import ru.openmes.core.network.api.MesApi
 import ru.openmes.core.network.api.NewsDto
 import ru.openmes.core.network.api.PortalApi
 import ru.openmes.core.network.api.ProfEventListsDto
+import ru.openmes.core.network.interceptor.OfflineCache
 import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
@@ -20,6 +24,9 @@ import java.util.Base64
 
 /** Сервисы колледжа вокруг дневника: новости, сведения об организации, профориентация, QR билета. */
 interface CollegeRepository {
+
+    /** Выполнить [block] только по офлайн-кэшу, без сети; null — в кэше нет. */
+    suspend fun <T> cachedOnly(block: suspend CollegeRepository.() -> T): T?
 
     // force = true — мимо кэша в памяти (pull-to-refresh).
     suspend fun getNews(page: Int, force: Boolean = false): NewsPage
@@ -32,13 +39,24 @@ interface CollegeRepository {
 
     /** PNG QR-кода студенческого билета. */
     suspend fun getStudentCardQr(studentId: String): ByteArray
+
+    /** Последний полученный QR (с диска) — показывается сразу и без сети. */
+    suspend fun getSavedStudentCardQr(studentId: String): ByteArray?
 }
 
 class MesCollegeRepository(
     private val mesApi: MesApi,
     private val portalApi: PortalApi,
     private val tokenStore: TokenStore,
+    private val offlineCache: OfflineCache? = null,
+    /** Тот же репозиторий поверх кэш-only API (без сети). */
+    private val cached: CollegeRepository? = null,
 ) : CollegeRepository {
+
+    override suspend fun <T> cachedOnly(block: suspend CollegeRepository.() -> T): T? {
+        val repo = cached ?: return null
+        return runSuspendCatching { repo.block() }.getOrNull()
+    }
 
     private val memory = MemoryCache(ttlMillis = 10 * 60_000L)
 
@@ -135,7 +153,13 @@ class MesCollegeRepository(
     override suspend fun getStudentCardQr(studentId: String): ByteArray = apiCall {
         val base64 = mesApi.getStudentCardQr(studentId).qrCode ?: error("Сервер не вернул QR-код")
         Base64.getMimeDecoder().decode(base64.substringAfter("base64,"))
+            .also { offlineCache?.writeBlob(qrBlob(studentId), it) }
     }
+
+    override suspend fun getSavedStudentCardQr(studentId: String): ByteArray? =
+        withContext(Dispatchers.IO) { offlineCache?.readBlob(qrBlob(studentId)) }
+
+    private fun qrBlob(studentId: String) = "student_card_qr_$studentId"
 
     private fun ProfEventListsDto?.toEvents(): List<ProfEvent> {
         if (this == null) return emptyList()

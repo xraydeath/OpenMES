@@ -80,6 +80,12 @@ class ProforientationViewModel(
     fun refresh(force: Boolean = true) {
         viewModelScope.launch {
             _state.value = _state.value.copy(loading = true, error = null)
+            // Сначала — сохранённое (мгновенно), затем свежее из сети.
+            if (_state.value.data == null) {
+                collegeRepository.cachedOnly { getProforientation(force = true) }?.let { data ->
+                    if (_state.value.data == null) _state.value = _state.value.copy(data = data)
+                }
+            }
             runSuspendCatching { collegeRepository.getProforientation(force) }
                 .onSuccess { _state.value = ProforientationUiState(data = it, loading = false) }
                 .onFailure { e -> _state.value = _state.value.copy(loading = false, error = e.message) }

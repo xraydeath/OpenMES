@@ -75,6 +75,12 @@ class SchoolInfoViewModel(
     fun refresh(force: Boolean = true) {
         viewModelScope.launch {
             _state.value = _state.value.copy(loading = true, error = null)
+            // Сначала — сохранённое (мгновенно), затем свежее из сети.
+            if (_state.value.info == null) {
+                collegeRepository.cachedOnly { getSchoolInfo(force = true) }?.let { info ->
+                    if (_state.value.info == null) _state.value = _state.value.copy(info = info)
+                }
+            }
             runSuspendCatching { collegeRepository.getSchoolInfo(force) }
                 .onSuccess { _state.value = SchoolInfoUiState(info = it, loading = false) }
                 .onFailure { e -> _state.value = _state.value.copy(loading = false, error = e.message) }

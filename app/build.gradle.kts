@@ -14,10 +14,9 @@ android {
         applicationId = "ru.openmes.app"
         minSdk = 26
         targetSdk = 36
-        // В CI номер сборки GitHub Actions: каждая сборка ставится поверх предыдущей.
-        val buildNumber = System.getenv("BUILD_NUMBER")?.toIntOrNull()
-        versionCode = buildNumber ?: 1
-        versionName = "0.1.0" + (buildNumber?.let { "-build.$it" } ?: "")
+        // versionCode — номер сборки GitHub Actions: каждая сборка ставится поверх предыдущей.
+        versionCode = System.getenv("BUILD_NUMBER")?.toIntOrNull() ?: 1
+        versionName = "0.2.0"
     }
 
     // Ключ релизов из окружения (GitHub Actions secrets). Без него — debug-ключ.

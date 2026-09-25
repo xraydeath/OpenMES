@@ -88,11 +88,21 @@ class StudentCardViewModel(
         val childId = (sessionRepository.session.value as? Session.LoggedIn)?.currentChild?.id ?: return
         viewModelScope.launch {
             _state.value = _state.value.copy(loading = true, error = null)
+            // Сначала — сохранённые билет и QR (мгновенно и без сети), затем свежие.
+            if (_state.value.card == null) {
+                diaryRepository.cachedOnly { getStudentCard(childId) }?.let { card ->
+                    if (_state.value.card == null) _state.value = _state.value.copy(card = card)
+                }
+            }
+            if (_state.value.qr == null) {
+                collegeRepository.getSavedStudentCardQr(childId)?.decodeBitmap()?.let { qr ->
+                    if (_state.value.qr == null) _state.value = _state.value.copy(qr = qr)
+                }
+            }
             // QR — отдельный POST без офлайн-кэша: его ошибка не прячет сам билет.
             val qr = async {
                 runSuspendCatching {
-                    val png = collegeRepository.getStudentCardQr(childId)
-                    BitmapFactory.decodeByteArray(png, 0, png.size)?.asImageBitmap()
+                    collegeRepository.getStudentCardQr(childId).decodeBitmap()
                 }.getOrNull()
             }
             runSuspendCatching { diaryRepository.getStudentCard(childId) }
@@ -102,6 +112,8 @@ class StudentCardViewModel(
         }
     }
 }
+
+private fun ByteArray.decodeBitmap(): ImageBitmap? = BitmapFactory.decodeByteArray(this, 0, size)?.asImageBitmap()
 
 /** Электронный студенческий билет (family/mobile/v1/student-card). */
 @Composable

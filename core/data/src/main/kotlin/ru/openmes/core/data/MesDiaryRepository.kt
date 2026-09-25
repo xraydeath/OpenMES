@@ -1,5 +1,7 @@
 package ru.openmes.core.data
 
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import ru.openmes.core.common.runSuspendCatching
 import ru.openmes.core.model.DayKind
 import ru.openmes.core.model.AcademicYear
@@ -21,6 +23,8 @@ import ru.openmes.core.model.SubjectPeriod
 import ru.openmes.core.network.MesEnvironment
 import ru.openmes.core.network.api.HomeworkFullDto
 import ru.openmes.core.network.api.MesApi
+import ru.openmes.core.network.interceptor.OfflineCache
+import java.net.URL
 import java.time.LocalDate
 import java.time.LocalTime
 import java.time.format.DateTimeFormatter
@@ -31,6 +35,7 @@ import java.time.format.DateTimeFormatter
 class MesDiaryRepository(
     private val mesApi: MesApi,
     private val tokenStore: TokenStore,
+    private val offlineCache: OfflineCache? = null,
     /** Тот же репозиторий поверх кэш-only MesApi (без сети). */
     private val cached: DiaryRepository? = null,
 ) : DiaryRepository {
@@ -285,6 +290,18 @@ class MesDiaryRepository(
         avatar.url?.takeIf { it.startsWith("http") }
             ?: "${MesEnvironment.SCHOOL_BASE_URL}avatars/${avatar.id}"
     }
+
+    override suspend fun getAvatar(personGuid: String): ByteArray? {
+        val url = getAvatarUrl(personGuid) ?: return null
+        return withContext(Dispatchers.IO) {
+            URL(url).openStream().use { it.readBytes() }.also { offlineCache?.writeBlob(avatarBlob(personGuid), it) }
+        }
+    }
+
+    override suspend fun getSavedAvatar(personGuid: String): ByteArray? =
+        withContext(Dispatchers.IO) { offlineCache?.readBlob(avatarBlob(personGuid)) }
+
+    private fun avatarBlob(personGuid: String) = "avatar_$personGuid"
 
     /** Детали оценки (учитель, форма контроля, критерии, распределение класса). */
     override suspend fun getMarkDetails(personId: String, markId: Long): MarkDetails = apiCall {
