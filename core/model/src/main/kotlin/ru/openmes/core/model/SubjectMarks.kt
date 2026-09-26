@@ -22,13 +22,17 @@ data class SubjectMarksData(
     val dynamic: String? = null,
     val periods: List<SubjectPeriod> = emptyList(),
 ) {
-    /** Период, активный сейчас (по start/end датам), либо первый. */
+    /**
+     * Период, активный сейчас (по start/end датам). Вне периодов (каникулы, после конца года) —
+     * последний уже начавшийся, до начала первого — первый.
+     */
     fun currentPeriod(now: LocalDate = LocalDate.now()): SubjectPeriod? =
         periods.firstOrNull { p ->
             val start = p.start
             val end = p.end
             start != null && end != null && !now.isBefore(start) && !now.isAfter(end)
-        } ?: periods.firstOrNull()
+        } ?: periods.filter { it.start?.isAfter(now) == false }.maxByOrNull { it.start!! }
+            ?: periods.firstOrNull()
 }
 
 data class SubjectPeriod(

@@ -13,9 +13,11 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import org.koin.core.context.GlobalContext
+import ru.openmes.core.common.toHM
 import ru.openmes.core.data.SettingsRepository
 import ru.openmes.core.model.Lesson
 import java.time.Duration
+import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.LocalTime
 
@@ -28,7 +30,6 @@ object LessonReminders {
 
     private const val PREFS = "lesson_reminders"
     private const val KEY_NOTIFIED = "notified"
-    private const val MAX_REMEMBERED = 30
 
     suspend fun reschedule(context: Context) {
         val settings = GlobalContext.getOrNull()?.get<SettingsRepository>()?.settings?.first() ?: return
@@ -59,7 +60,7 @@ object LessonReminders {
 
         if (remember) prefs(context).edit {
             val old = prefs(context).getStringSet(KEY_NOTIFIED, emptySet()).orEmpty()
-            putStringSet(KEY_NOTIFIED, (old + key).toList().takeLast(MAX_REMEMBERED).toSet())
+            putStringSet(KEY_NOTIFIED, pruneNotified(old + key, LocalDate.now()))
         }
 
         val minutes = Duration.between(LocalTime.now(), start).toMinutes().coerceAtLeast(0)
@@ -131,7 +132,12 @@ object LessonReminders {
 
     private fun Lesson.key() = "${date}_${id}"
 
-    private fun LocalTime.toHM() = "%02d:%02d".format(hour, minute)
+    /** Ключи «дата_id» прошедших дней больше не нужны (пары до сегодня не напоминаем) — выбрасываем по дате. */
+    internal fun pruneNotified(keys: Set<String>, today: LocalDate): Set<String> =
+        keys.filterTo(mutableSetOf()) { key ->
+            val date = runCatching { LocalDate.parse(key.substringBefore('_')) }.getOrNull()
+            date != null && !date.isBefore(today)
+        }
 
     private const val EXTRA_KEY = "key"
     private const val EXTRA_SUBJECT = "subject"
@@ -146,13 +152,7 @@ object LessonReminders {
 class LessonReminderReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         LessonReminders.show(context, intent)
-        val pending = goAsync()
-        CoroutineScope(Dispatchers.IO).launch {
-            try {
-                LessonReminders.reschedule(context)
-            } finally {
-                pending.finish()
-            }
-        }
+        // Следующий будильник может потребовать сеть — фоновой работой, а не в goAsync.
+        Reschedule.all(context)
     }
 }

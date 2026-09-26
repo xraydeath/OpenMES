@@ -20,6 +20,7 @@ import ru.openmes.core.model.Lesson
 import ru.openmes.core.model.LessonDetails
 import ru.openmes.core.model.Mark
 import ru.openmes.core.model.MarkDetails
+import ru.openmes.core.model.MedicalRecord
 import ru.openmes.core.model.Person
 import ru.openmes.core.model.StudentCard
 import ru.openmes.core.model.SubjectMarks
@@ -27,12 +28,24 @@ import ru.openmes.core.model.SubjectMarksData
 import ru.openmes.core.model.SubjectPeriod
 import ru.openmes.core.network.MesEnvironment
 import ru.openmes.core.network.api.HomeworkFullDto
+import ru.openmes.core.network.api.MedicalRecommendationDto
 import ru.openmes.core.network.api.MesApi
 import ru.openmes.core.network.interceptor.OfflineCache
-import java.net.URL
+import kotlinx.coroutines.suspendCancellableCoroutine
+import okhttp3.Call
+import okhttp3.Callback
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.Response
+import java.io.IOException
+import kotlin.coroutines.resume
+import kotlin.coroutines.resumeWithException
 import java.time.LocalDate
 import java.time.LocalTime
 import java.time.format.DateTimeFormatter
+
+/** Предохранитель от бесконечного листания справок ЕМИАС. */
+private const val MAX_MEDICAL_PAGES = 20
 
 /**
  * Репозиторий дневника поверх Family Mobile API (family/mobile/v1).
@@ -43,6 +56,8 @@ class MesDiaryRepository(
     private val offlineCache: OfflineCache? = null,
     /** Тот же репозиторий поверх кэш-only MesApi (без сети). */
     private val cached: DiaryRepository? = null,
+    /** Клиент для скачивания файлов по прямым ссылкам (аватар): без МЭШ-заголовков. */
+    private val httpClient: OkHttpClient? = null,
 ) : DiaryRepository {
 
     override suspend fun <T> cachedOnly(block: suspend DiaryRepository.() -> T): T? {
@@ -51,17 +66,6 @@ class MesDiaryRepository(
     }
 
     private val isoDate: DateTimeFormatter = DateTimeFormatter.ISO_LOCAL_DATE
-
-    /** Обёртка: HTTP-ошибки превращаются в исключение с телом ответа (видно на экране). */
-    private suspend fun <T> apiCall(block: suspend () -> T): T = try {
-        block()
-    } catch (e: retrofit2.HttpException) {
-        val body = runCatching { e.response()?.errorBody()?.string() }.getOrNull()
-        throw IllegalStateException(
-            "HTTP ${e.code()} ${e.message()}" + (body?.take(300)?.let { ": $it" } ?: ""),
-            e,
-        )
-    }
 
     /** student_id для API — из family profile children, не profile_id. */
     private suspend fun studentId(): String =
@@ -165,14 +169,13 @@ class MesDiaryRepository(
     /** Полные ДЗ (с материалами); если полный эндпоинт недоступен — короткий список. */
     override suspend fun getHomeworks(personId: String, from: LocalDate, to: LocalDate): List<Homework> = apiCall {
         val studentId = studentId()
-        runCatching {
+        runSuspendCatching {
             mesApi.getHomeworksFull(
                 studentId = studentId,
                 from = from.format(isoDate),
                 to = to.format(isoDate),
             ).payload.map { it.toHomework() }
-        }.getOrElse { fullError ->
-            if (fullError is kotlinx.coroutines.CancellationException) throw fullError
+        }.getOrElse {
             mesApi.getHomeworksShort(
                 studentId = studentId,
                 from = from.format(isoDate),
@@ -271,6 +274,23 @@ class MesDiaryRepository(
             }.sortedByDescending { it.date }
         }
 
+    override suspend fun getMedicalRecords(personId: String): List<MedicalRecord> = apiCall {
+        val studentId = studentId()
+        val records = LinkedHashMap<Long, MedicalRecommendationDto>()
+        // Страницы до пустой или не принёсшей ничего нового (перекрываются — дедуп по id).
+        for (page in 1..MAX_MEDICAL_PAGES) {
+            val batch = mesApi.getMedicalRecommendations(studentId, page)
+            if (batch.none { records.putIfAbsent(it.id, it) == null }) break
+        }
+        records.values.mapNotNull { r ->
+            MedicalRecord(
+                date = parseDate(r.date) ?: return@mapNotNull null,
+                type = r.type?.takeIf { it.isNotBlank() } ?: return@mapNotNull null,
+                partial = r.subjectIds.isNotEmpty(),
+            )
+        }.sortedBy { it.date }
+    }
+
     override suspend fun getStudentCard(personId: String): StudentCard = apiCall {
         val dto = mesApi.getStudentCard(studentId = studentId())
         StudentCard(
@@ -300,8 +320,32 @@ class MesDiaryRepository(
 
     override suspend fun getAvatar(personGuid: String): ByteArray? {
         val url = getAvatarUrl(personGuid) ?: return null
-        return withContext(Dispatchers.IO) {
-            URL(url).openStream().use { it.readBytes() }.also { offlineCache?.writeBlob(avatarBlob(personGuid), it) }
+        val bytes = download(url)
+        withContext(Dispatchers.IO) { offlineCache?.writeBlob(avatarBlob(personGuid), bytes) }
+        return bytes
+    }
+
+    /** GET по прямой ссылке через OkHttp: таймауты клиента, отмена корутины отменяет запрос. */
+    private suspend fun download(url: String): ByteArray {
+        val client = httpClient ?: error("Нет HTTP-клиента для загрузки")
+        val call = client.newCall(Request.Builder().url(url).build())
+        return suspendCancellableCoroutine { cont ->
+            cont.invokeOnCancellation { call.cancel() }
+            call.enqueue(object : Callback {
+                override fun onFailure(call: Call, e: IOException) {
+                    cont.resumeWithException(e)
+                }
+
+                override fun onResponse(call: Call, response: Response) {
+                    val result = runCatching {
+                        response.use {
+                            if (!it.isSuccessful) throw IOException("HTTP ${it.code} при загрузке файла")
+                            it.body?.bytes() ?: throw IOException("Пустой ответ")
+                        }
+                    }
+                    result.fold(cont::resume, cont::resumeWithException)
+                }
+            })
         }
     }
 

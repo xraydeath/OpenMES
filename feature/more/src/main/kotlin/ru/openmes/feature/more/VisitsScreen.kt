@@ -23,6 +23,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.launchIn
@@ -30,6 +31,7 @@ import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import ru.openmes.core.common.humanize
+import ru.openmes.core.common.toHM
 import ru.openmes.core.common.runSuspendCatching
 import ru.openmes.core.data.DiaryRepository
 import ru.openmes.core.data.Session
@@ -68,9 +70,18 @@ class VisitsViewModel(
     private val _state = MutableStateFlow(VisitsUiState())
     val state = _state.asStateFlow()
 
+    private var refreshJob: Job? = null
+    private var moreJob: Job? = null
+
     init {
-        sessionRepository.session
-            .onEach { if (it is Session.LoggedIn) refresh() }
+        // Смена ребёнка: прошлые загрузки отменяются, чужие проходы не показываются.
+        sessionRepository.currentChildIdChanges()
+            .onEach { childId ->
+                refreshJob?.cancel()
+                moreJob?.cancel()
+                _state.value = VisitsUiState()
+                if (childId != null) refresh()
+            }
             .launchIn(viewModelScope)
     }
 
@@ -78,10 +89,13 @@ class VisitsViewModel(
 
     fun refresh() {
         val childId = childId() ?: return
+        // Подгрузка старых недель, закончившись после обновления, сдвинула бы `from` мимо загруженных дней.
+        moreJob?.cancel()
+        refreshJob?.cancel()
         val from = _state.value.from
         val today = LocalDate.now()
-        viewModelScope.launch {
-            _state.update { it.copy(loading = true, error = null) }
+        refreshJob = viewModelScope.launch {
+            _state.update { it.copy(loading = true, loadingMore = false, error = null) }
             if (_state.value.days.isEmpty()) {
                 diaryRepository.cachedOnly { getVisits(childId, from, today) }?.let { days ->
                     if (_state.value.days.isEmpty()) _state.update { it.copy(days = days) }
@@ -96,10 +110,10 @@ class VisitsViewModel(
     /** Ещё четыре недели в прошлое. */
     fun loadMore() {
         val childId = childId() ?: return
-        if (_state.value.loadingMore) return
+        if (_state.value.loadingMore || _state.value.loading) return
         val to = _state.value.from.minusDays(1)
         val from = to.minusDays(PAGE_DAYS - 1)
-        viewModelScope.launch {
+        moreJob = viewModelScope.launch {
             _state.update { it.copy(loadingMore = true) }
             runSuspendCatching { diaryRepository.getVisits(childId, from, to) }
                 .onSuccess { older ->
@@ -166,7 +180,7 @@ fun VisitsScreen(viewModel: VisitsViewModel) {
                 item(key = "more") {
                     FilledTonalButton(
                         onClick = viewModel::loadMore,
-                        enabled = !state.loadingMore,
+                        enabled = !state.loadingMore && !state.loading,
                         shapes = ButtonDefaults.shapes(),
                         modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
                     ) {
@@ -237,5 +251,3 @@ private fun List<LocalTime>.averageTime(): LocalTime? =
     takeIf { it.isNotEmpty() }?.let { list -> LocalTime.ofSecondOfDay(list.map { it.toSecondOfDay().toLong() }.average().toLong()) }
 
 private fun formatMinutes(total: Long): String = "${total / 60} ч ${total % 60} мин"
-
-private fun LocalTime.toHM(): String = "%02d:%02d".format(hour, minute)

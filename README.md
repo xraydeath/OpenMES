@@ -13,7 +13,7 @@
 
 <br/>
 
-[**Скачать**](#download) · [**Возможности**](#features) · [**Сборка**](#build)
+[**Скачать**](#download) · [**Возможности**](#features) · [**Сборка**](#build) · [**Документация**](docs/README.md)
 
 </div>
 
@@ -104,6 +104,16 @@ cd OpenMES
 <div align="center">
 
 <h3>APK появится в <code>app/build/outputs/apk/release/</code>.<br/>Нужны JDK 17–21 и Android SDK (platform 36), minSdk 26 (Android 8.0).</h3>
+
+</div>
+
+---
+
+<div align="center">
+
+<h1><a id="docs"></a>Документация</h1>
+
+<h3>Карты API «Колледжа МЭШ» и школьного МЭШ, по которым написан клиент, — в <a href="docs/README.md">docs/</a>.</h3>
 
 </div>
 

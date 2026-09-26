@@ -29,6 +29,7 @@ val CachedMesApi = named("cachedMesApi")
 val CachedMealsApi = named("cachedMealsApi")
 val CachedPortalApi = named("cachedPortalApi")
 private val CachedHttpClient = named("cachedHttpClient")
+private val MeshAuthHttpClient = named("meshAuthHttpClient")
 
 val networkModule: Module = module {
 
@@ -42,16 +43,18 @@ val networkModule: Module = module {
     }
 
     // Логгер — отдельный объект, чтобы разместить его ПОСЛЕ AuthInterceptor в цепочке.
-    // Тела ответов (в них токены SUDIR/МЭШ) пишем только в debug-сборке.
+    // Только в debug-сборке: в URL есть student_id/person_ids, в телах — токены SUDIR/МЭШ.
     single {
         HttpLoggingInterceptor().apply {
             level = if (BuildConfig.DEBUG) {
                 HttpLoggingInterceptor.Level.BODY
             } else {
-                HttpLoggingInterceptor.Level.BASIC
+                HttpLoggingInterceptor.Level.NONE
             }
-            redactHeader("Auth-Token")
-            redactHeader("Authorization")
+            redactHeader(MesEnvironment.HEADER_AUTH_TOKEN)
+            redactHeader(MesEnvironment.HEADER_AUTHORIZATION)
+            redactHeader("Cookie")
+            redactHeader("Set-Cookie")
         }
     }
 
@@ -93,6 +96,17 @@ val networkModule: Module = module {
             .build()
     }
 
+    // Клиент авторизации МЭШ (sudir/auth, активация profile_info): без AuthInterceptor
+    // (токен передаётся явно, старый mesh подставлять нельзя) и без TokenAuthenticator —
+    // эти запросы идут изнутри обновления токена, 401 здесь не должен снова запускать обновление.
+    single(MeshAuthHttpClient) {
+        get<OkHttpClient>(BaseHttpClient).newBuilder()
+            .apply { interceptors().clear() }
+            .addInterceptor(CollegeRouting)
+            .addInterceptor(get<HttpLoggingInterceptor>())
+            .build()
+    }
+
     // TokenAuthenticator.
     single {
         val tokenProvider = get<TokenProvider>()
@@ -113,7 +127,7 @@ val networkModule: Module = module {
     single<MeshAuthApi> {
         Retrofit.Builder()
             .baseUrl(MesEnvironment.SCHOOL_BASE_URL)
-            .client(get<OkHttpClient>(AuthHttpClient))
+            .client(get<OkHttpClient>(MeshAuthHttpClient))
             .addConverterFactory(get<kotlinx.serialization.json.Json>().asConverterFactory("application/json".toMediaType()))
             .build()
             .create(MeshAuthApi::class.java)

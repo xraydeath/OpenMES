@@ -7,7 +7,7 @@ import retrofit2.http.Path
 import retrofit2.http.Query
 
 /**
- * Сервисы портала вне mapi: новости (api/news/v2) и профориентация (portfolio).
+ * Сервисы портала вне mapi: новости (api/news/v2), профориентация и портфолио (portfolio).
  * CollegeRouting эти пути не переписывает; авторизация — обычная (auth-token + Bearer).
  */
 interface PortalApi {
@@ -22,6 +22,22 @@ interface PortalApi {
     /** Результаты профориентации: тест, рекомендованные отрасли, мероприятия. */
     @GET("portfolio/app/persons/{personGuid}/proforientation/getResults")
     suspend fun getProforientation(@Path("personGuid") personGuid: String): ProforientationResponseDto
+
+    /** Олимпиады, конкурсы и прочие мероприятия портфолио. */
+    @GET("portfolio/app/persons/{personGuid}/events/list")
+    suspend fun getPortfolioEvents(@Path("personGuid") personGuid: String): PortfolioListDto<PortfolioEventDto>
+
+    /** Награды (дипломы, «Участник»/«Призёр»); entityId — id мероприятия из events/list. */
+    @GET("portfolio/app/persons/{personGuid}/rewards/list")
+    suspend fun getPortfolioRewards(@Path("personGuid") personGuid: String): PortfolioListDto<PortfolioRewardDto>
+
+    /** Спортивные награды: знаки ГТО, разряды. */
+    @GET("portfolio/app/persons/{personGuid}/sport-rewards/list")
+    suspend fun getSportRewards(@Path("personGuid") personGuid: String): PortfolioListDto<SportRewardDto>
+
+    /** Годовые оценки по учебным годам (в т.ч. школьные, до колледжа). */
+    @GET("portfolio/app/persons/{personGuid}/academic-performance/final-mark")
+    suspend fun getFinalMarks(@Path("personGuid") personGuid: String): PortfolioListDto<FinalMarksYearDto>
 }
 
 @Serializable
@@ -136,4 +152,71 @@ data class ProfEventDto(
     val address: String? = null,
     @SerialName("organizer_event") val organizer: String? = null,
     val visited: Boolean = false,
+)
+
+/** Ответ портфолио: {"data": [...], "result": "OK"}. */
+@Serializable
+data class PortfolioListDto<T>(val data: List<T> = emptyList())
+
+/** Значение справочника портфолио: {"code", "value"}. */
+@Serializable
+data class PortfolioRefDto(val value: String? = null)
+
+@Serializable
+data class PortfolioEventDto(
+    val id: Long = 0,
+    val name: String = "",
+    val category: PortfolioRefDto? = null,
+    val format: PortfolioRefDto? = null,
+    /** Баллы строкой: "15.0". */
+    val result: String? = null,
+    val maxScore: Double? = null,
+    val stageEvent: String? = null,
+    /** yyyy-MM-dd. */
+    val startDate: String? = null,
+    val endDate: String? = null,
+    val subjects: List<PortfolioRefDto> = emptyList(),
+    val isDelete: Boolean = false,
+)
+
+@Serializable
+data class PortfolioRewardDto(
+    val name: String = "",
+    val date: String? = null,
+    val source: PortfolioRefDto? = null,
+    val rewardType: PortfolioRefDto? = null,
+    val entityType: String? = null,
+    val entityId: String? = null,
+    val isDelete: Boolean = false,
+)
+
+@Serializable
+data class SportRewardDto(
+    val name: String = "",
+    val date: String? = null,
+    val type: PortfolioRefDto? = null,
+    val ageLimit: PortfolioRefDto? = null,
+    val rewardNumber: String? = null,
+    val expireDate: String? = null,
+    val isDelete: Boolean = false,
+)
+
+@Serializable
+data class FinalMarksYearDto(
+    /** Номер года обучения ("8"…"12"). */
+    val year: String? = null,
+    /** "2023-2024". */
+    val yearTitle: String? = null,
+    val educationLevel: String? = null,
+    val averageAllSubjects: Double? = null,
+    val subjects: List<FinalMarkDto> = emptyList(),
+)
+
+@Serializable
+data class FinalMarkDto(
+    val name: String = "",
+    /** Для «Зачет-Незачет»: "1" — зачёт, "0" — незачёт. */
+    val yearValue: String? = null,
+    val yearFivePointValue: Int? = null,
+    val gradeSystemType: PortfolioRefDto? = null,
 )

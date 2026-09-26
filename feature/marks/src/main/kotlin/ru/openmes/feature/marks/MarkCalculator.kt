@@ -66,7 +66,8 @@ import ru.openmes.core.designsystem.components.markTone
 import ru.openmes.core.model.Mark
 import ru.openmes.core.model.RoundingRules
 import ru.openmes.core.model.SubjectPeriod
-import kotlin.math.round
+import java.math.BigDecimal
+import java.math.RoundingMode
 
 /**
  * Калькулятор оценок (перенос MarkCalculator из OctoDiary-kt):
@@ -410,17 +411,19 @@ private fun AddMarkButton(value: Int, onClick: () -> Unit) {
 
 private fun List<Mark>.isValidForCalc(): Boolean = all { it.value.trim().toIntOrNull() != null }
 
+/**
+ * Взвешенный средний, округлённый до сотых «половина вверх» (как «%.2f» на экране и как считают
+ * вручную): 4,625 → 4,63. kotlin.math.round округляет половину к чётному (4,62) — и итог по порогу
+ * 4,63 расходился бы с показанным средним.
+ *
+ * Вес null или меньше 1 считается как 1: смысл веса 0 в данных МЭШ не задокументирован.
+ * Если окажется, что 0 значит «не учитывается», — менять здесь (и в totalWeight, и в sum).
+ */
 internal fun List<Mark>.weightedAverage(): Double {
     val totalWeight = sumOf { (it.weight ?: 1).coerceAtLeast(1) }
     if (totalWeight == 0) return 0.0
     val sum = sumOf { it.value.trim().toInt() * (it.weight ?: 1).coerceAtLeast(1) }
-    return round(sum.toDouble() / totalWeight * 100) / 100
-}
-
-/** Стрелка чипа: выше исходного среднего периода — UP. */
-private fun dynamicOf(average: Double, original: String?): String {
-    val base = original?.replace(',', '.')?.toDoubleOrNull() ?: return "NONE"
-    return if (average >= base) "UP" else "DOWN"
+    return BigDecimal(sum).divide(BigDecimal(totalWeight), 2, RoundingMode.HALF_UP).toDouble()
 }
 
 /** «5 4^2 3» → [(5,1), (4,2), (3,1)]; мусор пропускается. */

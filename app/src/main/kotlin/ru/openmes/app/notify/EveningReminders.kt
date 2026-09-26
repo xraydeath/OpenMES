@@ -11,13 +11,11 @@ import androidx.work.ExistingWorkPolicy
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.launch
 import org.koin.core.component.KoinComponent
 import org.koin.core.component.inject
 import org.koin.core.context.GlobalContext
+import ru.openmes.core.common.pluralRu
 import ru.openmes.core.common.runSuspendCatching
 import ru.openmes.core.data.DiaryRepository
 import ru.openmes.core.data.SettingsRepository
@@ -58,14 +56,8 @@ object EveningReminders {
 class EveningReminderReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         EveningReminders.runNow(context)
-        val pending = goAsync()
-        CoroutineScope(Dispatchers.IO).launch {
-            try {
-                EveningReminders.reschedule(context)
-            } finally {
-                pending.finish()
-            }
-        }
+        // Следующий будильник — фоновой работой, а не в goAsync (бюджет ресивера ~10 с).
+        Reschedule.all(context)
     }
 }
 
@@ -93,7 +85,7 @@ class EveningReminderWorker(
             if (open.isNotEmpty()) {
                 val lines = open.map { "${it.subjectName}: ${it.task.lineSequence().first().take(80)}" }
                 val builder = Notifications.builder(applicationContext, Notifications.Channel.EVENING)
-                    .setContentTitle("На завтра не сделано: ${open.size} ${plural(open.size, "задание", "задания", "заданий")}")
+                    .setContentTitle("На завтра не сделано: ${open.size} ${pluralRu(open.size, "задание", "задания", "заданий")}")
                     .setContentText(open.joinToString(", ") { it.subjectName })
                     .setStyle(NotificationCompat.InboxStyle().also { style -> lines.forEach(style::addLine) })
                 Notifications.post(applicationContext, ID_HOMEWORK, builder)
@@ -122,16 +114,5 @@ class EveningReminderWorker(
     private companion object {
         const val ID_HOMEWORK = 7001
         const val ID_TESTS = 7002
-
-        fun plural(n: Int, one: String, few: String, many: String): String {
-            val mod100 = n % 100
-            val mod10 = n % 10
-            return when {
-                mod100 in 11..14 -> many
-                mod10 == 1 -> one
-                mod10 in 2..4 -> few
-                else -> many
-            }
-        }
     }
 }

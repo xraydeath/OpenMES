@@ -1,5 +1,6 @@
 package ru.openmes.app.notify
 
+import ru.openmes.core.common.toHM
 import ru.openmes.core.model.Lesson
 import java.time.LocalDate
 import java.time.LocalTime
@@ -48,6 +49,27 @@ data class SlotSnapshot(
             )
         }.getOrNull()
     }
+}
+
+/**
+ * Изменения в окне [today]..[until] между прошлым снимком и текущим. Сравниваем только дни, что были
+ * в прошлом снимке (новый день на краю окна — не «новые пары»), и только в пределах нынешнего окна
+ * (окно сократили — дни за краем не «отменены»). null — сервер вернул пустое окно при непустом прошлом:
+ * скорее сбой, чем отмена всего; такой ответ не сохраняем и не сообщаем.
+ */
+fun diffWindow(
+    previous: List<SlotSnapshot>,
+    current: List<SlotSnapshot>,
+    today: LocalDate,
+    until: LocalDate,
+    includeRooms: Boolean = true,
+    includeTeachers: Boolean = true,
+): List<ScheduleChange>? {
+    val old = previous.filter { !it.date.isBefore(today) && !it.date.isAfter(until) }
+    val new = current.filter { !it.date.isBefore(today) && !it.date.isAfter(until) }
+    if (new.isEmpty() && old.isNotEmpty()) return null
+    val lastDay = previous.maxOfOrNull { it.date } ?: return emptyList()
+    return diffSchedules(old, new.filter { !it.date.isAfter(lastDay) }, includeRooms, includeTeachers)
 }
 
 /** Изменение в расписании за день [date]. */
@@ -109,4 +131,4 @@ private fun SlotSnapshot.where(): String = when {
     else -> ""
 }
 
-private fun LocalTime?.hm(): String = this?.let { "%02d:%02d".format(it.hour, it.minute) } ?: "—"
+private fun LocalTime?.hm(): String = this?.toHM() ?: "—"

@@ -1,7 +1,10 @@
 package ru.openmes.app
 
+import android.os.Build
 import android.os.Bundle
 import android.os.SystemClock
+import android.view.WindowManager
+import androidx.activity.compose.LocalActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.isSystemInDarkTheme
@@ -56,6 +59,19 @@ private fun OpenMESRoot() {
     var stoppedAt by rememberSaveable { mutableLongStateOf(0L) }
     // Без PIN — разблокировано; так включение PIN в настройках не блокирует сразу.
     LaunchedEffect(loaded?.pinEnabled) { if (loaded?.pinEnabled == false) locked = false }
+    // С PIN — ни скриншотов, ни превью в «Недавних»: иначе содержимое видно в обход блокировки.
+    val activity = LocalActivity.current
+    LaunchedEffect(activity, loaded?.pinEnabled) {
+        val secure = loaded?.pinEnabled == true
+        activity?.window?.let { window ->
+            if (secure) {
+                window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
+            } else {
+                window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
+            }
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) activity?.setRecentsScreenshotEnabled(!secure)
+    }
     val lifecycleOwner = LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->

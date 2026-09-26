@@ -3,7 +3,7 @@ package ru.openmes.core.data
 import ru.openmes.core.network.interceptor.TokenProvider
 
 /**
- * Мост: сетевой слой получает mesh-токен из Keystore-хранилища.
+ * Мост: сетевой слой получает mesh-токен из Keystore-хранилища (расшифрованная копия в памяти).
  */
 class TokenProviderImpl(
     private val store: TokenStore,
@@ -11,5 +11,5 @@ class TokenProviderImpl(
 
     override fun currentAupdToken(): String? = store.load()?.meshAccessToken
 
-    override fun currentProfileId(): String? = store.load()?.profileId
+    override fun tokenIssuedAtMillis(): Long? = store.load()?.meshIssuedAtMillis
 }

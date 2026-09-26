@@ -13,6 +13,8 @@ data class AuthTokens(
     val sudirExpiresAtMillis: Long? = null,
     // МЭШ-токены (mesh_access_token = aupd_token).
     val meshAccessToken: String? = null,
+    /** Когда получен [meshAccessToken] (питание/проходы на свежий токен не обновляем). */
+    val meshIssuedAtMillis: Long? = null,
     // Текущий профиль.
     val profileId: String? = null,
     /** Роль для заголовка X-Mes-RoleId (po: student=32, parent=2). */

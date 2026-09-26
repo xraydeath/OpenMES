@@ -11,6 +11,7 @@ import ru.openmes.core.model.Lesson
 import ru.openmes.core.model.LessonDetails
 import ru.openmes.core.model.Mark
 import ru.openmes.core.model.MarkDetails
+import ru.openmes.core.model.MedicalRecord
 import ru.openmes.core.model.GradeBook
 import ru.openmes.core.model.Person
 import ru.openmes.core.model.SubjectMarks
@@ -64,6 +65,9 @@ interface DiaryRepository {
         from: LocalDate,
         to: LocalDate,
     ): List<AttendanceEntry>
+
+    /** Справки ЕМИАС (больничные, освобождения) за всё время, по дню на запись. */
+    suspend fun getMedicalRecords(personId: String): List<MedicalRecord>
 
     /** Детали оценки (учитель, форма контроля, критерии, распределение класса). */
     suspend fun getMarkDetails(personId: String, markId: Long): MarkDetails

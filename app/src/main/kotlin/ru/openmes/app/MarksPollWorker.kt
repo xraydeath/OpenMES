@@ -10,13 +10,12 @@ import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.withTimeoutOrNull
 import org.koin.core.component.KoinComponent
 import org.koin.core.component.inject
 import ru.openmes.app.notify.Notifications
+import ru.openmes.app.notify.currentChildId
+import ru.openmes.core.common.runSuspendCatching
 import ru.openmes.core.data.DiaryRepository
-import ru.openmes.core.data.Session
-import ru.openmes.core.data.SessionRepository
 import ru.openmes.core.data.SettingsRepository
 import java.util.concurrent.TimeUnit
 
@@ -29,17 +28,13 @@ class MarksPollWorker(
     params: WorkerParameters,
 ) : CoroutineWorker(context, params), KoinComponent {
 
-    private val sessionRepository: SessionRepository by inject()
     private val diaryRepository: DiaryRepository by inject()
     private val settingsRepository: SettingsRepository by inject()
 
     override suspend fun doWork(): Result {
-        val session = withTimeoutOrNull(30_000) {
-            sessionRepository.session.first { it !is Session.Loading }
-        } as? Session.LoggedIn ?: return Result.success()
-        val childId = session.currentChild?.id ?: return Result.success()
+        val childId = currentChildId() ?: return Result.success()
 
-        val subjects = runCatching { diaryRepository.getSubjectMarks(childId) }
+        val subjects = runSuspendCatching { diaryRepository.getSubjectMarks(childId) }
             .getOrElse { return Result.retry() }
 
         val prefs = applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)

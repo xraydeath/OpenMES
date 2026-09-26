@@ -16,7 +16,7 @@ android {
         targetSdk = 36
         // versionCode — номер сборки GitHub Actions: каждая сборка ставится поверх предыдущей.
         versionCode = System.getenv("BUILD_NUMBER")?.toIntOrNull() ?: 1
-        versionName = "0.3.0"
+        versionName = "0.4.0"
     }
 
     // Ключ релизов из окружения (GitHub Actions secrets). Без него — debug-ключ.

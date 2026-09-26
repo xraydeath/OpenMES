@@ -1,6 +1,7 @@
 package ru.openmes.core.network.api
 
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.JsonObject
 import retrofit2.http.GET
 import retrofit2.http.Query
 
@@ -34,6 +35,14 @@ interface MealsApi {
     /** Баланс: clientIds — JSON-массив `[{"personId":"…"}]`. */
     @GET("api/food/meals/v3/clients/balance")
     suspend fun getBalance(@Query("clientIds") clientIds: String): List<ClientBalanceDto>
+
+    /** Операции по счёту за период (даты yyyy-MM-dd). Формат операции не задокументирован — сырой JSON. */
+    @GET("api/food/meals/v3/transactions")
+    suspend fun getTransactions(
+        @Query("personId") personId: String,
+        @Query("from") from: String,
+        @Query("to") to: String,
+    ): FoodTransactionsDto
 
     /** Организация питания (оператор) для клиента. */
     @GET("api/food/meals/v3/clients/food-provider")
@@ -116,4 +125,18 @@ data class ClientBalanceDto(
     val contractId: Long? = null,
     /** Копейки. */
     val balance: Long? = null,
+    val expenseConstraints: ExpenseConstraintsDto? = null,
+)
+
+/** Ограничения трат, копейки. */
+@Serializable
+data class ExpenseConstraintsDto(
+    val expenseDayLimit: Long? = null,
+    val balanceThreshold: Long? = null,
+)
+
+@Serializable
+data class FoodTransactionsDto(
+    val hasNext: Boolean = false,
+    val transactions: List<JsonObject> = emptyList(),
 )

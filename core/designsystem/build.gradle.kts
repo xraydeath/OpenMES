@@ -39,6 +39,7 @@ dependencies {
     api(libs.compose.material.icons)
     api(libs.compose.ui.tooling.preview)
     debugApi(libs.compose.ui.tooling)
+    implementation(project(":core:common"))
     implementation(libs.androidx.browser)
 
     testImplementation(libs.junit)

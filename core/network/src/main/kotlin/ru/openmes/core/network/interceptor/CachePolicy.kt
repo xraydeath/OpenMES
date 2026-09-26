@@ -1,6 +1,9 @@
 package ru.openmes.core.network.interceptor
 
-/** Разделы офлайн-кэша: какие ответы МЭШ к какому разделу относятся (по префиксу пути). */
+/**
+ * Разделы офлайн-кэша: какие ответы МЭШ к какому разделу относятся (по префиксу пути;
+ * `*` — один сегмент, например guid в адресах портфолио). Побеждает первый подходящий раздел.
+ */
 enum class CacheSection(val key: String, val paths: List<String>) {
     /** Профиль для восстановления сессии: без него запуск без сети выкидывает из аккаунта. Кэшируется всегда. */
     SESSION(
@@ -36,10 +39,18 @@ enum class CacheSection(val key: String, val paths: List<String>) {
             "api/family/mobile/v1/marks",
             "api/family/mobile/v1/subject_marks",
             "api/family/mobile/v1/attestation",
+            // Годовые оценки из портфолио.
+            "portfolio/app/persons/*/academic-performance/",
         ),
     ),
     HOMEWORK("homework", listOf("api/family/mobile/v1/homeworks")),
-    ATTENDANCE("attendance", listOf("api/family/mobile/v1/attendance")),
+    ATTENDANCE(
+        "attendance",
+        listOf(
+            "api/family/mobile/v1/attendance",
+            "api/ej/core/family/v1/emias_medical_recommendations",
+        ),
+    ),
 
     /** Проходы через турникеты. */
     VISITS("visits", listOf("api/pass/entrances/")),
@@ -49,11 +60,22 @@ enum class CacheSection(val key: String, val paths: List<String>) {
             "api/food/meals/v3/menu/",
             "api/food/meals/v3/clients/balance",
             "api/food/meals/v3/clients/food-provider",
+            "api/food/meals/v3/transactions",
         ),
     ),
     NEWS("news", listOf("api/news/v2/news")),
 
-    /** Студбилет (и его QR), сведения о колледже, профориентация, аватар. */
+    /** Олимпиады, мероприятия и награды из портфолио. */
+    PORTFOLIO(
+        "portfolio",
+        listOf(
+            "portfolio/app/persons/*/events/",
+            "portfolio/app/persons/*/rewards/",
+            "portfolio/app/persons/*/sport-rewards/",
+        ),
+    ),
+
+    /** Студбилет (и его QR), сведения о колледже, профориентация, аватар; прочие разделы портфолио. */
     PROFILE(
         "profile",
         listOf(
@@ -68,7 +90,17 @@ enum class CacheSection(val key: String, val paths: List<String>) {
     val userToggleable: Boolean get() = this != SESSION
 
     companion object {
-        fun of(path: String): CacheSection? = entries.firstOrNull { s -> s.paths.any { path.startsWith(it) } }
+        fun of(path: String): CacheSection? = entries.firstOrNull { s -> s.paths.any { matches(path, it) } }
+
+        private fun matches(path: String, pattern: String): Boolean {
+            if ('*' !in pattern) return path.startsWith(pattern)
+            val regex = patterns.getOrPut(pattern) {
+                Regex(pattern.split('*').joinToString("[^/]+") { Regex.escape(it) })
+            }
+            return regex.matchesAt(path, 0)
+        }
+
+        private val patterns = java.util.concurrent.ConcurrentHashMap<String, Regex>()
     }
 }
 

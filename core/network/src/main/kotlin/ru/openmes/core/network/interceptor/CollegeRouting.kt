@@ -11,12 +11,19 @@ import okhttp3.Response
  * «Public College remote config v372: mapi_host_config + Moscow apiMapiUrl».
  */
 object CollegeRouting : Interceptor {
+    /** Заголовок-метка: не переписывать путь (только для консоли API). */
+    const val RAW_HEADER = "X-OpenMES-Raw"
+
     override fun intercept(chain: Interceptor.Chain): Response {
         val request = chain.request()
         val url = request.url
 
         // Не трогаем login.mos.ru и внешние запросы.
         if (url.host != "school.mos.ru") return chain.proceed(request)
+        // Отладочная консоль: запрос «как есть», без переписывания путей.
+        if (request.header(RAW_HEADER) != null) {
+            return chain.proceed(request.newBuilder().removeHeader(RAW_HEADER).build())
+        }
 
         val path = url.encodedPath
         val collegePath = when {

@@ -6,14 +6,18 @@ import android.util.Base64
 import java.security.MessageDigest
 import java.security.SecureRandom
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import ru.openmes.core.common.runSuspendCatching
 import ru.openmes.core.model.Person
+import ru.openmes.core.network.BuildConfig
 import ru.openmes.core.network.MesEnvironment
 import ru.openmes.core.network.api.ClientRegistrationRequest
 import ru.openmes.core.network.api.MesApi
@@ -59,7 +63,7 @@ class SudirSessionRepository(
     // -------------------------------------------------------------------
 
     override suspend fun ensureOAuthClient() {
-        val existing = tokenStore.load()
+        val existing = withContext(Dispatchers.IO) { tokenStore.load() }
         val hasClient = !existing?.oauthClientId.isNullOrBlank() && !existing?.oauthClientSecret.isNullOrBlank()
         val registrationFresh = existing?.registeredAtMillis != null &&
             System.currentTimeMillis() - existing.registeredAtMillis!! < REGISTRATION_TTL_MS
@@ -84,14 +88,15 @@ class SudirSessionRepository(
         if (registration.clientId.isBlank()) {
             throw IllegalStateException("SUDIR вернул пустой client_id")
         }
-        val current = tokenStore.load() ?: AuthTokens()
-        tokenStore.save(
-            current.copy(
-                oauthClientId = registration.clientId,
-                oauthClientSecret = registration.clientSecret,
-                registeredAtMillis = System.currentTimeMillis(),
-            ),
-        )
+        withContext(Dispatchers.IO) {
+            tokenStore.update { current ->
+                (current ?: AuthTokens()).copy(
+                    oauthClientId = registration.clientId,
+                    oauthClientSecret = registration.clientSecret,
+                    registeredAtMillis = System.currentTimeMillis(),
+                )
+            }
+        }
     }
 
     // -------------------------------------------------------------------
@@ -99,17 +104,17 @@ class SudirSessionRepository(
     // -------------------------------------------------------------------
 
     override fun buildLoginUrl(): String {
-        val tokens = tokenStore.load()
-        val clientId = tokens?.oauthClientId ?: error("OAuth-клиент не зарегистрирован — сначала ensureOAuthClient()")
-
         // PKCE: code_verifier 43..128 символов, challenge = BASE64URL(SHA-256(verifier)).
         val verifier = generateCodeVerifier()
         val state = generateState()
         val challenge = pkceChallenge(verifier)
 
-        tokenStore.save(
-            tokens.copy(pendingCodeVerifier = verifier, pendingState = state),
-        )
+        val tokens = tokenStore.update { current ->
+            current?.takeIf { it.oauthClientId != null }
+                ?.copy(pendingCodeVerifier = verifier, pendingState = state)
+        }
+        val clientId = tokens?.oauthClientId?.takeIf { tokens.pendingState == state }
+            ?: error("OAuth-клиент не зарегистрирован — сначала ensureOAuthClient()")
 
         // Сборка URL как в оригинале (stringifyUrl, encode=false): scope — RAW-строка с '+'.
         return MesEnvironment.SUDIR_BASE_URL + "sps/oauth/ae" +
@@ -131,7 +136,7 @@ class SudirSessionRepository(
     override fun handleDeepLink(url: String) {
         if (!url.startsWith(MesEnvironment.OAUTH_REDIRECT_URI)) return
         scope.launch {
-            runCatching { onLoginRedirect(url) }
+            runSuspendCatching { onLoginRedirect(url) }
                 .onFailure { e ->
                     _session.value = Session.LoggedOut(error = e.message ?: "Ошибка авторизации")
                 }
@@ -152,11 +157,13 @@ class SudirSessionRepository(
             return true
         }
 
-        val tokens = tokenStore.load() ?: return true
+        val tokens = withContext(Dispatchers.IO) { tokenStore.load() } ?: return true
         // Валидация state (stateMismatchError в оригинале).
         val expectedState = tokens.pendingState
         val actualState = uri.getQueryParameter("state")
-        if (expectedState == null || expectedState != actualState) {
+        // Входа не начинали (ссылка из истории/повторная доставка intent) — молча игнорируем.
+        if (expectedState == null) return true
+        if (expectedState != actualState) {
             _session.value = Session.LoggedOut(error = "state mismatch: ссылка не совпадает с запросом")
             return true
         }
@@ -180,22 +187,31 @@ class SudirSessionRepository(
             return true
         }
 
-        tokenStore.save(
-            tokens.copy(
-                sudirAccessToken = sudirAccessToken,
-                sudirRefreshToken = tokenResponse.refreshToken,
-                sudirExpiresAtMillis = System.currentTimeMillis() + (tokenResponse.expiresIn ?: 3600L) * 1000,
-                pendingCodeVerifier = null,
-                pendingState = null,
-            ),
-        )
+        // Новый аккаунт: данные прошлого в памяти не нужны.
+        MemoryCache.clearAll()
+        withContext(Dispatchers.IO) {
+            tokenStore.update { current ->
+                (current ?: tokens).copy(
+                    sudirAccessToken = sudirAccessToken,
+                    sudirRefreshToken = tokenResponse.refreshToken,
+                    sudirExpiresAtMillis = System.currentTimeMillis() + (tokenResponse.expiresIn ?: 3600L) * 1000,
+                    pendingCodeVerifier = null,
+                    pendingState = null,
+                )
+            }
+        }
 
         // Шаг 5: обмен SUDIR-токена на МЭШ-токен (mesh_access_token = API-токен).
         val meshAccessToken = exchangeSudirToken(sudirAccessToken)
 
-        tokenStore.save(
-            tokenStore.load()?.copy(meshAccessToken = meshAccessToken) ?: AuthTokens(meshAccessToken = meshAccessToken),
-        )
+        withContext(Dispatchers.IO) {
+            tokenStore.update { current ->
+                (current ?: AuthTokens()).copy(
+                    meshAccessToken = meshAccessToken,
+                    meshIssuedAtMillis = System.currentTimeMillis(),
+                )
+            }
+        }
 
         // Шаг 6: профили.
         loadProfiles(sudirAccessToken, meshAccessToken)
@@ -207,34 +223,86 @@ class SudirSessionRepository(
     // (схема OctoDiary: API-токен — всегда свежий mesh_access_token)
     // -------------------------------------------------------------------
 
-    override suspend fun refreshTokens(): Boolean {
-        val tokens = tokenStore.load() ?: return false
-        val refreshToken = tokens.sudirRefreshToken ?: return false
-        if (refreshToken.isBlank() || tokens.oauthClientId.isNullOrBlank()) return false
-        return runCatching {
-            val basic = basicAuth(tokens.oauthClientId!!, tokens.oauthClientSecret.orEmpty())
-            val tokenResponse = sudirApi.token(
-                basicAuth = basic,
+    private val refreshLock = Any()
+
+    /** Идущее обновление: параллельные вызовы ждут его, а не запускают второй refresh_token grant. */
+    private var refreshInFlight: Deferred<RefreshResult>? = null
+
+    override suspend fun refreshTokens(): Boolean = refresh() == RefreshResult.OK
+
+    /** Однопоточное обновление: живёт в [scope], отмена одного из ждущих его не прерывает. */
+    private suspend fun refresh(): RefreshResult {
+        val deferred = synchronized(refreshLock) {
+            refreshInFlight?.takeIf { it.isActive }
+                ?: scope.async {
+                    runSuspendCatching { doRefresh() }.getOrDefault(RefreshResult.FAILED)
+                }.also { refreshInFlight = it }
+        }
+        return deferred.await()
+    }
+
+    private suspend fun doRefresh(): RefreshResult {
+        val tokens = tokenStore.load() ?: return RefreshResult.NO_SESSION
+        val refreshToken = tokens.sudirRefreshToken
+        val clientId = tokens.oauthClientId
+        if (refreshToken.isNullOrBlank() || clientId.isNullOrBlank()) return RefreshResult.NO_SESSION
+
+        val tokenResponse = try {
+            sudirApi.token(
+                basicAuth = basicAuth(clientId, tokens.oauthClientSecret.orEmpty()),
                 form = mapOf(
                     "grant_type" to "refresh_token",
                     "refresh_token" to refreshToken,
                 ),
             )
-            val newAccess = tokenResponse.accessToken
-            if (newAccess.isBlank()) return@runCatching false
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            val result = classifyRefreshError(e)
+            log("refresh: SUDIR te → $result")
+            // Refresh-токен отозван/истёк — сессию не вернуть; сеть/5xx — пробуем позже.
+            if (result == RefreshResult.REJECTED) expireSession(refreshToken)
+            return result
+        }
+        val newAccess = tokenResponse.accessToken
+        if (newAccess.isBlank()) return RefreshResult.FAILED
+        val newRefresh = tokenResponse.refreshToken?.takeIf { it.isNotBlank() } ?: refreshToken
 
-            val newMesh = exchangeSudirToken(newAccess)
+        // SUDIR мог выдать новый refresh-токен (старый уже недействителен): сохраняем сразу,
+        // даже если обмен на mesh ниже сорвётся. Только поверх текущих токенов и только если
+        // за время запроса не вышли из аккаунта и не вошли заново.
+        var applied = false
+        tokenStore.update { current ->
+            current?.takeIf { it.sudirRefreshToken == refreshToken }?.copy(
+                sudirAccessToken = newAccess,
+                sudirRefreshToken = newRefresh,
+                sudirExpiresAtMillis = System.currentTimeMillis() + (tokenResponse.expiresIn ?: 3600L) * 1000,
+            )?.also { applied = true }
+        }
+        if (!applied) return RefreshResult.FAILED
 
-            tokenStore.save(
-                tokens.copy(
-                    sudirAccessToken = newAccess,
-                    sudirRefreshToken = tokenResponse.refreshToken ?: refreshToken,
-                    sudirExpiresAtMillis = System.currentTimeMillis() + (tokenResponse.expiresIn ?: 3600L) * 1000,
-                    meshAccessToken = newMesh,
-                ),
-            )
-            true
-        }.getOrDefault(false)
+        val newMesh = runSuspendCatching { exchangeSudirToken(newAccess) }
+            .getOrElse { return RefreshResult.FAILED }
+        // Новый mesh недействителен, пока не вызван profile_info; его сбой не критичен.
+        runSuspendCatching {
+            meshAuthApi.getProfileInfo(authToken = newMesh, authorization = "Bearer $newMesh")
+        }
+
+        applied = false
+        tokenStore.update { current ->
+            current?.takeIf { it.sudirRefreshToken == newRefresh }?.copy(
+                meshAccessToken = newMesh,
+                meshIssuedAtMillis = System.currentTimeMillis(),
+            )?.also { applied = true }
+        }
+        return if (applied) RefreshResult.OK else RefreshResult.FAILED
+    }
+
+    /** Выход после отказа SUDIR — если за это время не вошли заново с другим refresh-токеном. */
+    private suspend fun expireSession(rejectedRefreshToken: String) {
+        if (tokenStore.load()?.sudirRefreshToken != rejectedRefreshToken) return
+        clearSession()
+        _session.value = Session.LoggedOut(error = "Сессия истекла — войдите заново")
     }
 
     /** POST /v3/auth/sudir/auth → mesh_access_token (API-токен МЭШ). */
@@ -259,18 +327,24 @@ class SudirSessionRepository(
         val child = current.children.firstOrNull { it.id == personId } ?: return
         // student_id (mapi) и contingent_guid (eventcalendar) — от выбранного ребёнка;
         // profileId остаётся id ACL-профиля (он же в заголовке Profile-Id).
-        tokenStore.load()?.let {
-            tokenStore.save(it.copy(studentId = child.id, personGuid = child.personGuid))
+        withContext(Dispatchers.IO) {
+            tokenStore.update { it?.copy(studentId = child.id, personGuid = child.personGuid) }
         }
         _session.value = current.copy(currentChild = child)
     }
 
     override suspend fun logout() {
+        clearSession()
+        _session.value = Session.LoggedOut()
+    }
+
+    /** Токены, офлайн-кэш и кэши в памяти — чтобы данные аккаунта не пережили выход. */
+    private suspend fun clearSession() {
         withContext(Dispatchers.IO) {
             tokenStore.clear()
             offlineCache.clear()
         }
-        _session.value = Session.LoggedOut()
+        MemoryCache.clearAll()
     }
 
     // -------------------------------------------------------------------
@@ -278,37 +352,41 @@ class SudirSessionRepository(
     // -------------------------------------------------------------------
 
     private suspend fun restoreSession() {
-        android.util.Log.i("OpenMES-Session", "restoreSession: старт")
+        log("restoreSession: старт")
         val tokens = withContext(Dispatchers.IO) { tokenStore.load() }
-        android.util.Log.i("OpenMES-Session", "restoreSession: tokens=${if (tokens == null) "null" else "есть, mesh=${tokens.meshAccessToken != null}, sudirRefresh=${tokens.sudirRefreshToken != null}"}")
+        log("restoreSession: tokens=${if (tokens == null) "null" else "есть, mesh=${tokens.meshAccessToken != null}, sudirRefresh=${tokens.sudirRefreshToken != null}"}")
         if (tokens == null) {
             _session.value = Session.LoggedOut()
-            android.util.Log.i("OpenMES-Session", "restoreSession: → LoggedOut (нет токенов)")
+            log("restoreSession: → LoggedOut (нет токенов)")
             return
         }
         if (tokens.sudirRefreshToken != null && tokens.sudirRefreshToken.isNotBlank()) {
             // Обновляем SUDIR-токен и mesh за один заход (схема OctoDiary).
-            android.util.Log.i("OpenMES-Session", "restoreSession: пробуем refresh")
-            if (refreshTokens()) {
-                android.util.Log.i("OpenMES-Session", "restoreSession: refresh OK, грузим профили")
-                val fresh = withContext(Dispatchers.IO) { tokenStore.load() }
-                if (fresh?.meshAccessToken != null) {
-                    loadProfiles(fresh.sudirAccessToken.orEmpty(), fresh.meshAccessToken)
-                    return
+            log("restoreSession: пробуем refresh")
+            when (refresh()) {
+                RefreshResult.OK -> {
+                    log("restoreSession: refresh OK, грузим профили")
+                    val fresh = withContext(Dispatchers.IO) { tokenStore.load() }
+                    if (fresh?.meshAccessToken != null) {
+                        loadProfiles(fresh.sudirAccessToken.orEmpty(), fresh.meshAccessToken)
+                        return
+                    }
                 }
-            } else {
-                android.util.Log.i("OpenMES-Session", "restoreSession: refresh FAILED")
+                // Сессия уже сброшена в expireSession.
+                RefreshResult.REJECTED -> return
+                // Без сети — пробуем старый mesh (профиль найдётся в офлайн-кэше).
+                else -> log("restoreSession: refresh FAILED")
             }
         }
         if (tokens.meshAccessToken != null) {
-            android.util.Log.i("OpenMES-Session", "restoreSession: грузим профили со старым mesh")
-            runCatching { loadProfiles(tokens.sudirAccessToken.orEmpty(), tokens.meshAccessToken) }
+            log("restoreSession: грузим профили со старым mesh")
+            runSuspendCatching { loadProfiles(tokens.sudirAccessToken.orEmpty(), tokens.meshAccessToken) }
                 .onFailure {
-                    android.util.Log.i("OpenMES-Session", "restoreSession: профили упали: ${it.message}")
+                    log("restoreSession: профили упали: ${it.message}")
                     _session.value = Session.LoggedOut(error = "Сессия истекла — войдите заново")
                 }
         } else {
-            android.util.Log.i("OpenMES-Session", "restoreSession: → LoggedOut (нет mesh)")
+            log("restoreSession: → LoggedOut (нет mesh)")
             _session.value = Session.LoggedOut()
         }
     }
@@ -317,11 +395,11 @@ class SudirSessionRepository(
      * Затем GET /api/family/mobile/v1/profile → student_id + имя + класс. */
     /** ACL-активация токена → collegeProfile → сессия (логика рабочего форка OctoDiary-kt). */
     private suspend fun loadProfiles(sudirToken: String, meshToken: String) {
-        android.util.Log.i("OpenMES-Session", "loadProfiles: старт")
-        runCatching {
+        log("loadProfiles: старт")
+        runSuspendCatching {
             // 1. Активация: profile_info (токен ДО этого запроса недействителен для остальных!).
             val profiles = mesApi.getProfileInfo(authToken = meshToken)
-            android.util.Log.i("OpenMES-Session", "loadProfiles: профилей=${profiles.size}")
+            log("loadProfiles: профилей=${profiles.size}")
 
             // 2. Первая поддерживаемая ACL-запись (StudentProfile→32, ParentProfile→2).
             val selected = profiles.firstOrNull { p ->
@@ -340,7 +418,7 @@ class SudirSessionRepository(
                 roleId = roleId,
                 rowLimit = rowLimit,
             )
-            android.util.Log.i("OpenMES-Session", "loadProfiles: children=${familyProfile.children.size}")
+            log("loadProfiles: children=${familyProfile.children.size}")
 
             val children = familyProfile.children.mapNotNull { c ->
                 val id = c.id?.toString() ?: return@mapNotNull null
@@ -354,9 +432,9 @@ class SudirSessionRepository(
                 )
             }
 
-            val tokens = tokenStore.load()
             // Сохраняем выбор ребёнка между запусками (у родителя их может быть несколько).
-            val child = children.firstOrNull { it.id == tokens?.studentId } ?: children.firstOrNull()
+            val savedStudentId = withContext(Dispatchers.IO) { tokenStore.load()?.studentId }
+            val child = children.firstOrNull { it.id == savedStudentId } ?: children.firstOrNull()
             val self = familyProfile.profile
             val person = if (roleId == 32 || self == null) {
                 child ?: Person(id = profileId.toString(), firstName = "", lastName = "")
@@ -368,27 +446,34 @@ class SudirSessionRepository(
                 )
             }
 
-            tokenStore.save(
-                (tokens ?: AuthTokens()).copy(
-                    profileId = profileId.toString(),
-                    studentId = child?.id ?: profileId.toString(),
-                    personGuid = child?.personGuid,
-                    roleId = roleId.toString(),
-                    profileRole = selected.type,
-                ),
-            )
+            // Поверх текущих токенов; вышли из аккаунта, пока грузили, — сессию не воскрешаем.
+            withContext(Dispatchers.IO) {
+                tokenStore.update { current ->
+                    current?.copy(
+                        profileId = profileId.toString(),
+                        studentId = child?.id ?: profileId.toString(),
+                        personGuid = child?.personGuid,
+                        roleId = roleId.toString(),
+                        profileRole = selected.type,
+                    )
+                }
+            } ?: return@runSuspendCatching
             _session.value = Session.LoggedIn(
                 person = person,
                 children = children,
                 currentChild = child ?: person,
             )
-            android.util.Log.i("OpenMES-Session", "loadProfiles: сессия LoggedIn, детей=${children.size}")
+            log("loadProfiles: сессия LoggedIn, детей=${children.size}")
         }.onFailure { e ->
-            android.util.Log.i("OpenMES-Session", "loadProfiles: ошибка: ${e.message}")
-            if (e is kotlinx.coroutines.CancellationException) throw e
+            log("loadProfiles: ошибка: ${e.message}")
             // Раньше тут была «пустая» LoggedIn-сессия без ребёнка: экраны молча ничего не грузили.
             _session.value = Session.LoggedOut(error = "Не удалось загрузить профиль: ${e.message}")
         }
+    }
+
+    /** Диагностика входа — только в debug-сборке. */
+    private fun log(message: String) {
+        if (BuildConfig.DEBUG) android.util.Log.i("OpenMES-Session", message)
     }
 
     private fun basicAuth(clientId: String, clientSecret: String): String {
@@ -424,3 +509,25 @@ class SudirSessionRepository(
         const val REGISTRATION_TTL_MS = 50L * 60 * 1000
     }
 }
+
+/** Итог обновления токенов. */
+internal enum class RefreshResult {
+    OK,
+
+    /** SUDIR явно отверг refresh-токен (400/401, invalid_grant) — нужен повторный вход. */
+    REJECTED,
+
+    /** Сеть, таймаут, 5xx и прочее временное — сессию сохраняем. */
+    FAILED,
+
+    /** Нечего обновлять: нет токенов или OAuth-клиента. */
+    NO_SESSION,
+}
+
+/** Разбор ошибки /sps/oauth/te: выход из аккаунта — только при явном отказе сервера. */
+internal fun classifyRefreshError(e: Throwable): RefreshResult = when {
+    e is retrofit2.HttpException && e.code() in REJECTED_CODES -> RefreshResult.REJECTED
+    else -> RefreshResult.FAILED
+}
+
+private val REJECTED_CODES = setOf(400, 401)

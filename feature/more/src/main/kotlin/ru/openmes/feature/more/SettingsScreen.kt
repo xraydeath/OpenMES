@@ -1,5 +1,7 @@
 package ru.openmes.feature.more
 
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.foundation.clickable
 import androidx.biometric.BiometricManager
 import androidx.biometric.BiometricManager.Authenticators.BIOMETRIC_WEAK
 import androidx.compose.foundation.layout.Arrangement
@@ -12,6 +14,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.BrightnessAuto
@@ -45,9 +48,11 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
@@ -66,7 +71,12 @@ import ru.openmes.core.designsystem.components.groupShape
  * Настройки: тема (в духе expressive), Material You, уведомления, PIN/биометрия, о приложении.
  */
 @Composable
-fun SettingsScreen(viewModel: MoreViewModel, onOpenCache: () -> Unit, onOpenNotifications: () -> Unit) {
+fun SettingsScreen(
+    viewModel: MoreViewModel,
+    onOpenCache: () -> Unit,
+    onOpenNotifications: () -> Unit,
+    onOpenApiConsole: () -> Unit,
+) {
     val settings by viewModel.settings.collectAsStateWithLifecycle()
     val context = LocalContext.current
     var pinDialog by remember { mutableStateOf(false) }
@@ -219,7 +229,21 @@ fun SettingsScreen(viewModel: MoreViewModel, onOpenCache: () -> Unit, onOpenNoti
                         val version = remember {
                             runCatching { context.packageManager.getPackageInfo(context.packageName, 0).versionName }.getOrNull()
                         }
-                        Text("Версия ${version.orEmpty()}", style = MaterialTheme.typography.bodySmall)
+                        // Скрытый вход в отладочную консоль API: 7 нажатий на версию.
+                        var versionTaps by remember { mutableIntStateOf(0) }
+                        Text(
+                            "Версия ${version.orEmpty()}",
+                            style = MaterialTheme.typography.bodySmall,
+                            modifier = Modifier.clickable(
+                                interactionSource = null,
+                                indication = null,
+                            ) {
+                                if (++versionTaps >= 7) {
+                                    versionTaps = 0
+                                    onOpenApiConsole()
+                                }
+                            },
+                        )
                     }
                 }
                 Text(
@@ -255,17 +279,20 @@ internal fun SwitchItem(
     shape: Shape,
     enabled: Boolean = true,
 ) {
+    // Вся строка — один переключатель: TalkBack видит один элемент «Переключатель, вкл/выкл».
     MesListItem(
         headline = title,
         supporting = subtitle,
         icon = icon,
         enabled = enabled,
         shape = shape,
-        onClick = { onCheckedChange(!checked) },
+        modifier = Modifier
+            .clip(shape)
+            .toggleable(value = checked, enabled = enabled, role = Role.Switch, onValueChange = onCheckedChange),
         trailingContent = {
             Switch(
                 checked = checked,
-                onCheckedChange = onCheckedChange,
+                onCheckedChange = null,
                 enabled = enabled,
                 thumbContent = if (checked) {
                     { Icon(Icons.Rounded.Check, contentDescription = null, modifier = Modifier.size(SwitchDefaults.IconSize)) }

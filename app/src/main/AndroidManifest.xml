@@ -50,6 +50,19 @@
                 android:resource="@xml/schedule_widget_info" />
         </receiver>
 
+        <!-- Виджет «Учебный день»: к скольки приходить и сколько пар. -->
+        <receiver
+            android:name=".widget.DayWidgetReceiver"
+            android:exported="true"
+            android:label="Учебный день">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/day_widget_info" />
+        </receiver>
+
         <!-- Напоминания: пары, вечерние ДЗ/контрольные, восстановление будильников. -->
         <receiver
             android:name=".notify.LessonReminderReceiver"

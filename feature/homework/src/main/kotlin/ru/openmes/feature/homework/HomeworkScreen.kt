@@ -15,7 +15,6 @@ import ru.openmes.core.designsystem.components.ScrollableFill
 import ru.openmes.core.designsystem.components.MesPullToRefreshBox
 import android.widget.Toast
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
@@ -45,7 +44,6 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -60,7 +58,12 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.launchIn
@@ -83,7 +86,18 @@ import ru.openmes.core.designsystem.components.groupShape
 import ru.openmes.core.designsystem.components.openUrl
 import ru.openmes.core.model.Homework
 import ru.openmes.core.model.HomeworkMaterial
+import java.time.DayOfWeek
 import java.time.LocalDate
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.runtime.remember
+import kotlinx.coroutines.flow.update
+import ru.openmes.core.common.weekStart
+import ru.openmes.core.common.toFullRu
+import ru.openmes.core.designsystem.components.WeekBar
+import ru.openmes.core.designsystem.components.rememberDayPager
+import ru.openmes.core.designsystem.components.rememberShortSwipeFling
 
 class HomeworkViewModel(
     private val sessionRepository: SessionRepository,
@@ -91,12 +105,26 @@ class HomeworkViewModel(
 ) : ViewModel() {
 
     data class HomeworkUiState(
-        val grouped: List<Pair<LocalDate, List<Homework>>> = emptyList(),
-        val loading: Boolean = true,
+        val selectedDate: LocalDate = LocalDate.now(),
+        /** Задания по неделям: понедельник → задания недели. */
+        val weeks: Map<LocalDate, List<Homework>> = emptyMap(),
+        /** Недели, которые сейчас грузятся. */
+        val loadingWeeks: Set<LocalDate> = emptySet(),
         /** Обновление по свайпу (фоновое — после показа кэша — без индикатора). */
         val refreshing: Boolean = false,
-        val error: String? = null,
-    )
+        /** Ошибки загрузки по неделям. */
+        val errors: Map<LocalDate, String> = emptyMap(),
+    ) {
+        /** Задания дня, по предмету. */
+        fun homeworksFor(date: LocalDate): List<Homework> =
+            weeks[date.weekStart()].orEmpty().filter { it.date == date }.sortedBy { it.subjectName }
+
+        fun isLoaded(date: LocalDate) = date.weekStart() in weeks
+
+        fun isLoading(date: LocalDate) = date.weekStart() in loadingWeeks
+
+        fun errorFor(date: LocalDate) = errors[date.weekStart()]
+    }
 
     private val _state = MutableStateFlow(HomeworkUiState())
     val state = _state.asStateFlow()
@@ -117,50 +145,124 @@ class HomeworkViewModel(
     var openingMaterial by mutableStateOf<String?>(null)
         private set
 
+    /** Ребёнок, чьи задания сейчас в состоянии: сменили ребёнка — всё чужое сбрасываем. */
+    private var loadedChildId: String? = null
+    /** Загрузки по неделям: новая загрузка недели отменяет прежнюю. */
+    private val loadJobs = mutableMapOf<LocalDate, Job>()
+
+    /**
+     * Отметки «выполнено», ещё не подтверждённые сервером (id → желаемое значение):
+     * пришедший в это время список (кэш или сеть) не должен откатить оптимистичное значение.
+     */
+    private val pendingDone = mutableMapOf<String, Boolean>()
+    /** Последнее известное серверу значение отметок из [pendingDone] — к нему откатываемся при ошибке. */
+    private val confirmedDone = mutableMapOf<String, Boolean>()
+    /** Номер последнего переключения по id: ответ на более старый запрос итог не решает. */
+    private val pendingSeq = mutableMapOf<String, Int>()
+    private var toggleSeq = 0
+    /** Запросы отметок — по одному: при двойном тапе последним на сервер уходит последнее значение. */
+    private val toggleMutex = Mutex()
+
     init {
+        // Перезагрузка — только при смене ребёнка (или входе), а не на каждое обновление сессии.
         sessionRepository.session
-            .onEach { if (it is Session.LoggedIn) load(userInitiated = false) }
+            .map { (it as? Session.LoggedIn)?.currentChild?.id }
+            .distinctUntilChanged()
+            .onEach { childId -> if (childId != null) load(childId, userInitiated = false) }
             .launchIn(viewModelScope)
     }
 
-    fun refresh() = load(userInitiated = true)
-
-    private fun load(userInitiated: Boolean) {
+    fun refresh() {
         val childId = (sessionRepository.session.value as? Session.LoggedIn)?.currentChild?.id ?: return
-        viewModelScope.launch {
-            _state.value = _state.value.copy(loading = true, refreshing = userInitiated, error = null)
-            val today = LocalDate.now()
-            val from = today.minusDays(2)
-            val to = today.plusDays(14)
+        load(childId, _state.value.selectedDate.weekStart(), userInitiated = true)
+    }
+
+    fun selectDate(date: LocalDate) {
+        if (_state.value.selectedDate == date) return
+        _state.update { it.copy(selectedDate = date) }
+        val childId = loadedChildId ?: return
+        val monday = date.weekStart()
+        if (monday !in _state.value.weeks && monday !in loadJobs) load(childId, monday, userInitiated = false)
+    }
+
+    private fun load(childId: String, userInitiated: Boolean) {
+        if (childId != loadedChildId) {
+            loadedChildId = childId
+            loadJobs.values.forEach { it.cancel() }
+            loadJobs.clear()
+            pendingDone.clear()
+            confirmedDone.clear()
+            pendingSeq.clear()
+            _state.update { HomeworkUiState(selectedDate = it.selectedDate) }
+        }
+        load(childId, _state.value.selectedDate.weekStart(), userInitiated)
+    }
+
+    private fun load(childId: String, monday: LocalDate, userInitiated: Boolean) {
+        // Новая загрузка отменяет прежнюю: иначе опоздавший старый ответ затирал бы свежий.
+        loadJobs.remove(monday)?.cancel()
+        val job = viewModelScope.launch {
+            _state.update {
+                it.copy(
+                    loadingWeeks = it.loadingWeeks + monday,
+                    refreshing = userInitiated || it.refreshing,
+                    errors = it.errors - monday,
+                )
+            }
+            val sunday = monday.plusDays(6)
             // Сначала — сохранённое в офлайн-кэше (мгновенно), затем свежие данные из сети.
-            if (_state.value.grouped.isEmpty()) {
-                diaryRepository.cachedOnly { getHomeworks(childId, from, to) }?.let { list ->
-                    if (_state.value.grouped.isEmpty()) _state.value = _state.value.copy(grouped = list.grouped())
+            if (monday !in _state.value.weeks) {
+                diaryRepository.cachedOnly { getHomeworks(childId, monday, sunday) }?.let { list ->
+                    _state.update { if (monday in it.weeks) it else it.copy(weeks = it.weeks + (monday to list.withPending())) }
                 }
             }
             runSuspendCatching {
-                diaryRepository.getHomeworks(childId, from, to)
+                diaryRepository.getHomeworks(childId, monday, sunday)
             }.onSuccess { list ->
-                _state.value = HomeworkUiState(grouped = list.grouped(), loading = false)
+                _state.update { it.copy(weeks = it.weeks + (monday to list.withPending())) }
             }.onFailure { e ->
-                _state.value = _state.value.copy(loading = false, refreshing = false, error = e.message)
+                _state.update { it.copy(errors = it.errors + (monday to (e.message ?: "Ошибка загрузки"))) }
+                // С данными на экране полноэкранной ошибки нет — сообщаем отдельно, чтобы сбой не был тихим.
+                if (monday in _state.value.weeks && userInitiated) {
+                    _events.send(Event.Error("Не удалось обновить задания" + (e.message?.let { ": $it" } ?: "")))
+                }
             }
+            _state.update { it.copy(loadingWeeks = it.loadingWeeks - monday, refreshing = it.refreshing && !userInitiated) }
         }
+        loadJobs[monday] = job
+        job.invokeOnCompletion { if (loadJobs[monday] === job) loadJobs.remove(monday) }
     }
 
-    private fun List<Homework>.grouped(): List<Pair<LocalDate, List<Homework>>> =
-        groupBy { it.date }
-            .toSortedMap()
-            .map { (date, items) -> date to items.sortedBy { it.subjectName } }
+    /** Неподтверждённые отметки поверх пришедших с сервера. */
+    private fun List<Homework>.withPending(): List<Homework> =
+        map { hw -> pendingDone[hw.id]?.let { hw.copy(isDone = it) } ?: hw }
 
-    fun toggleDone(homework: Homework) {
-        val childId = (sessionRepository.session.value as? Session.LoggedIn)?.currentChild?.id ?: return
+    fun toggleDone(homeworkId: String) {
+        val childId = loadedChildId ?: return
+        // Текущее значение — из состояния, а не из снимка композиции: двойной тап не шлёт одно и то же.
+        val current = _state.value.weeks.values.firstNotNullOfOrNull { list -> list.firstOrNull { it.id == homeworkId } } ?: return
+        val target = !current.isDone
+        // Оптимистичное обновление
+        if (homeworkId !in pendingDone) confirmedDone[homeworkId] = current.isDone
+        pendingDone[homeworkId] = target
+        val seq = ++toggleSeq
+        pendingSeq[homeworkId] = seq
+        updateLocal(homeworkId, target)
         viewModelScope.launch {
-            // Оптимистичное обновление
-            updateLocal(homework.id, !homework.isDone)
-            runSuspendCatching {
-                diaryRepository.setHomeworkDone(childId, homework.id, !homework.isDone)
-            }.onFailure { updateLocal(homework.id, homework.isDone) }
+            val result = toggleMutex.withLock {
+                runSuspendCatching { diaryRepository.setHomeworkDone(childId, homeworkId, target) }
+            }
+            if (loadedChildId != childId) return@launch
+            if (result.isSuccess) confirmedDone[homeworkId] = target
+            // Пока шёл запрос, отметку переключили снова — решит более новый запрос.
+            if (pendingSeq[homeworkId] != seq) return@launch
+            pendingSeq -= homeworkId
+            pendingDone -= homeworkId
+            val confirmed = confirmedDone.remove(homeworkId)
+            result.onFailure { e ->
+                updateLocal(homeworkId, confirmed ?: !target)
+                _events.send(Event.Error("Не удалось сохранить отметку" + (e.message?.let { ": $it" } ?: "")))
+            }
         }
     }
 
@@ -198,11 +300,9 @@ class HomeworkViewModel(
     }
 
     private fun updateLocal(homeworkId: String, isDone: Boolean) {
-        _state.value = _state.value.copy(
-            grouped = _state.value.grouped.map { (d, list) ->
-                d to list.map { if (it.id == homeworkId) it.copy(isDone = isDone) else it }
-            },
-        )
+        _state.update { st ->
+            st.copy(weeks = st.weeks.mapValues { (_, list) -> list.map { if (it.id == homeworkId) it.copy(isDone = isDone) else it } })
+        }
     }
 }
 
@@ -234,65 +334,100 @@ fun HomeworkScreen(viewModel: HomeworkViewModel) {
         }
     }
 
+    val today = remember { LocalDate.now() }
+    val dayPager = rememberDayPager(state.selectedDate, viewModel::selectDate)
+    val colors = MaterialTheme.colorScheme
+
     MesPullToRefreshBox(
         isRefreshing = state.refreshing,
         onRefresh = viewModel::refresh,
         modifier = Modifier.fillMaxSize(),
     ) {
-        when {
-            state.error != null && state.grouped.isEmpty() -> ScrollableFill { ErrorState(onRetry = viewModel::refresh, details = state.error) }
-            state.loading && state.grouped.isEmpty() -> LoadingState()
-            state.grouped.isEmpty() -> ScrollableFill {
-                EmptyState(
-                    icon = Icons.AutoMirrored.Rounded.MenuBook,
-                    title = "Домашних заданий нет",
-                    subtitle = "Отдыхайте!",
-                )
-            }
-
-            else -> LazyColumn(
+        Column(Modifier.fillMaxSize()) {
+            WeekBar(
+                firstMonday = dayPager.firstMonday,
+                selected = dayPager.highlightedDate,
+                today = today,
+                dayOff = { it.dayOfWeek == DayOfWeek.SUNDAY },
+                onSelect = viewModel::selectDate,
+                // Точка — есть невыполненное задание, бледная — всё сделано.
+                marker = { date ->
+                    val items = state.homeworksFor(date)
+                    when {
+                        items.isEmpty() -> null
+                        items.any { !it.isDone } -> colors.primary
+                        else -> colors.outlineVariant
+                    }
+                },
+            )
+            HorizontalPager(
+                state = dayPager.pagerState,
+                flingBehavior = rememberShortSwipeFling(dayPager.pagerState),
                 modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 24.dp),
-                verticalArrangement = Arrangement.spacedBy(GroupGap),
-            ) {
-                state.grouped.forEach { (date, items) ->
-                    item(key = "header_$date") {
-                        val done = items.count { it.isDone }
-                        SectionHeader(
-                            title = date.humanize(),
-                            modifier = Modifier.padding(top = 8.dp),
-                            trailing = {
-                                StatusPill(
-                                    text = "$done из ${items.size}",
-                                    containerColor = if (done == items.size) {
-                                        MaterialTheme.colorScheme.primaryContainer
-                                    } else {
-                                        MaterialTheme.colorScheme.surfaceContainerHigh
-                                    },
-                                    contentColor = if (done == items.size) {
-                                        MaterialTheme.colorScheme.onPrimaryContainer
-                                    } else {
-                                        MaterialTheme.colorScheme.onSurfaceVariant
-                                    },
-                                )
-                            },
+            ) { page ->
+                val date = dayPager.days[page]
+                val items = state.homeworksFor(date)
+                val error = state.errorFor(date)
+                when {
+                    !state.isLoaded(date) && error != null ->
+                        ScrollableFill { ErrorState(onRetry = viewModel::refresh, details = error) }
+                    !state.isLoaded(date) -> LoadingState()
+                    items.isEmpty() -> Column(
+                        Modifier
+                            .fillMaxSize()
+                            .verticalScroll(rememberScrollState())
+                            .padding(horizontal = 16.dp),
+                    ) {
+                        DayHeader(date, items)
+                        EmptyState(
+                            icon = Icons.AutoMirrored.Rounded.MenuBook,
+                            title = "Заданий нет",
+                            subtitle = "На этот день ничего не задали",
                         )
                     }
-                    itemsIndexed(items, key = { _, it -> it.id }) { index, homework ->
-                        HomeworkCard(
-                            homework = homework,
-                            shape = groupShape(index, items.size),
-                            openingMaterial = viewModel.openingMaterial,
-                            onToggleDone = { viewModel.toggleDone(homework) },
-                            onOpenMaterial = { viewModel.openMaterial(homework, it) },
-                            onCopyMaterialLink = { viewModel.copyMaterialLink(homework, it) },
-                            modifier = Modifier.animateItem(),
-                        )
+
+                    else -> LazyColumn(
+                        modifier = Modifier.fillMaxSize(),
+                        contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 24.dp),
+                        verticalArrangement = Arrangement.spacedBy(GroupGap),
+                    ) {
+                        item(key = "header") { DayHeader(date, items) }
+                        itemsIndexed(items, key = { _, it -> it.id }) { index, homework ->
+                            HomeworkCard(
+                                homework = homework,
+                                shape = groupShape(index, items.size),
+                                openingMaterial = viewModel.openingMaterial,
+                                onToggleDone = { viewModel.toggleDone(homework.id) },
+                                onOpenMaterial = { viewModel.openMaterial(homework, it) },
+                                onCopyMaterialLink = { viewModel.copyMaterialLink(homework, it) },
+                                modifier = Modifier.animateItem(),
+                            )
+                        }
                     }
                 }
             }
         }
     }
+}
+
+/** «Сегодня, пятница» / «29 сентября, понедельник» и счётчик «2 из 3». */
+@Composable
+private fun DayHeader(date: LocalDate, items: List<Homework>) {
+    val done = items.count { it.isDone }
+    val allDone = items.isNotEmpty() && done == items.size
+    SectionHeader(
+        title = "${date.humanize()}, ${date.dayOfWeek.toFullRu()}",
+        modifier = Modifier.padding(top = 8.dp),
+        trailing = {
+            if (items.isNotEmpty()) {
+                StatusPill(
+                    text = "$done из ${items.size}",
+                    containerColor = if (allDone) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerHigh,
+                    contentColor = if (allDone) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        },
+    )
 }
 
 @OptIn(ExperimentalLayoutApi::class)

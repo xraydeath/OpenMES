@@ -2,7 +2,6 @@ package ru.openmes.core.common
 
 import java.time.DayOfWeek
 import java.time.LocalDate
-import java.time.LocalDateTime
 import java.time.LocalTime
 import java.time.Month
 import java.time.format.DateTimeFormatter
@@ -57,6 +56,9 @@ fun LocalDate.humanize(now: LocalDate = LocalDate.now()): String = when (this) {
 fun LocalDate.toRuDate(includeYear: Boolean = false): String =
     "${dayOfMonth} ${MONTHS_GENITIVE[month]}" + if (includeYear) " ${year}" else ""
 
+/** «сентября». */
+fun Month.genitiveRu(): String = MONTHS_GENITIVE.getValue(this)
+
 fun DayOfWeek.toShortRu(): String = DAY_OF_WEEK_SHORT[this] ?: ""
 
 fun DayOfWeek.toFullRu(): String = DAY_OF_WEEK_FULL[this] ?: ""
@@ -78,6 +80,3 @@ fun parseTimeOrNull(raw: String?): LocalTime? {
 }
 
 fun LocalTime.toHM(): String = format(DateTimeFormatter.ofPattern("HH:mm"))
-
-/** «сейчас 14:35, 22 сентября» — приветствие на главной. */
-fun LocalDateTime.greetingDateTime(): String = "$hour:$minute"

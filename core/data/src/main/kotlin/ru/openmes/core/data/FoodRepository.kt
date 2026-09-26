@@ -3,6 +3,9 @@ package ru.openmes.core.data
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.longOrNull
 import ru.openmes.core.common.runSuspendCatching
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
@@ -12,14 +15,17 @@ import ru.openmes.core.model.Dish
 import ru.openmes.core.model.FoodBalance
 import ru.openmes.core.model.FoodComplex
 import ru.openmes.core.model.FoodDay
+import ru.openmes.core.model.FoodTransaction
 import ru.openmes.core.model.MealKind
 import ru.openmes.core.network.api.DishDto
 import ru.openmes.core.network.api.MealsApi
+import ru.openmes.core.network.interceptor.OfflineCache
 import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.LocalTime
+import java.time.OffsetDateTime
 
-/** Питание: меню столовой и буфета, баланс. */
+/** Питание: меню столовой и буфета, баланс и операции по счёту. */
 interface FoodRepository {
 
     /** Выполнить [block] только по офлайн-кэшу, без сети; null — в кэше нет. */
@@ -34,6 +40,9 @@ interface FoodRepository {
     /** Баланс лицевого счёта питания (null — счёта нет). */
     suspend fun getBalance(): FoodBalance?
 
+    /** Операции по счёту за период, новые сверху. */
+    suspend fun getTransactions(from: LocalDate, to: LocalDate): List<FoodTransaction>
+
     /** Название организации питания (оператора). */
     suspend fun getProvider(force: Boolean = false): String?
 }
@@ -43,9 +52,13 @@ class MealsFoodRepository(
     private val tokenStore: TokenStore,
     /** Тот же репозиторий поверх кэш-only MealsApi (без сети). */
     private val cached: FoodRepository? = null,
+    /** Офлайн-кэш: ответы из него не запоминаются в памяти как свежие. */
+    offlineCache: OfflineCache? = null,
+    /** false — без кэша в памяти (репозиторий поверх кэш-only API). */
+    memoryCache: Boolean = true,
 ) : FoodRepository {
 
-    private val memory = MemoryCache(ttlMillis = 60 * 60_000L)
+    private val memory = MemoryCache(ttlMillis = 60 * 60_000L, offlineCache = offlineCache, enabled = memoryCache)
 
     override suspend fun <T> cachedOnly(block: suspend FoodRepository.() -> T): T? {
         val repo = cached ?: return null
@@ -54,16 +67,6 @@ class MealsFoodRepository(
 
     private fun personGuid(): String =
         tokenStore.load()?.personGuid ?: error("Нет активного профиля — войдите заново")
-
-    private suspend fun <T> apiCall(block: suspend () -> T): T = try {
-        block()
-    } catch (e: retrofit2.HttpException) {
-        val body = runCatching { e.response()?.errorBody()?.string() }.getOrNull()
-        throw IllegalStateException(
-            "HTTP ${e.code()} ${e.message()}" + (body?.take(300)?.let { ": $it" } ?: ""),
-            e,
-        )
-    }
 
     override suspend fun getMenu(from: LocalDate, to: LocalDate, force: Boolean): List<FoodDay> {
         val person = personGuid()
@@ -119,8 +122,42 @@ class MealsFoodRepository(
         val person = personGuid()
         val clientIds = buildJsonArray { add(buildJsonObject { put("personId", person) }) }
         mealsApi.getBalance(Json.encodeToString(clientIds)).firstOrNull()?.let {
-            FoodBalance(personId = person, amount = (it.balance ?: 0) / 100.0, contractId = it.contractId)
+            FoodBalance(
+                personId = person,
+                amount = (it.balance ?: 0) / 100.0,
+                contractId = it.contractId,
+                dayLimit = it.expenseConstraints?.expenseDayLimit?.let { k -> k / 100.0 },
+                lowBalanceThreshold = it.expenseConstraints?.balanceThreshold?.let { k -> k / 100.0 },
+            )
         }
+    }
+
+    override suspend fun getTransactions(from: LocalDate, to: LocalDate): List<FoodTransaction> = apiCall {
+        mealsApi.getTransactions(personGuid(), from.toString(), to.toString())
+            .transactions.map { it.toTransaction() }
+            .sortedByDescending { it.date }
+    }
+
+    /**
+     * Формат операции сервер не документирует, а живых примеров пока не было —
+     * берём первое подходящее из вероятных имён полей (суммы — копейки, как везде в meals).
+     */
+    private fun JsonObject.toTransaction(): FoodTransaction {
+        fun text(vararg keys: String) = keys.firstNotNullOfOrNull { k ->
+            (this[k] as? JsonPrimitive)?.takeIf { it.isString }?.content?.takeIf { it.isNotBlank() }
+        }
+        fun number(vararg keys: String) = keys.firstNotNullOfOrNull { k -> (this[k] as? JsonPrimitive)?.longOrNull }
+        val date = text("transactionDate", "date", "operationDate", "createdAt", "dateTime")?.let { raw ->
+            runCatching { OffsetDateTime.parse(raw).toLocalDateTime() }.getOrNull()
+                ?: runCatching { LocalDateTime.parse(raw) }.getOrNull()
+                ?: runCatching { LocalDate.parse(raw.take(10)).atStartOfDay() }.getOrNull()
+        }
+        return FoodTransaction(
+            date = date,
+            amount = number("sum", "amount", "totalSum", "price")?.let { it / 100.0 },
+            title = text("complexName", "name", "dishName", "description", "title"),
+            type = text("transactionType", "type", "operationType"),
+        )
     }
 
     override suspend fun getProvider(force: Boolean): String? {

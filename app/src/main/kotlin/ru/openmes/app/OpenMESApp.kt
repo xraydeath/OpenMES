@@ -23,7 +23,9 @@ import org.koin.core.context.startKoin
 import org.koin.dsl.module
 import ru.openmes.app.notify.EveningReminders
 import ru.openmes.app.notify.LessonReminders
+import ru.openmes.app.notify.Reschedule
 import ru.openmes.app.notify.ScheduleChangesWorker
+import ru.openmes.core.common.runSuspendCatching
 import ru.openmes.core.data.SessionRepository
 import ru.openmes.core.data.SettingsRepository
 import ru.openmes.core.data.dataModule
@@ -34,11 +36,13 @@ import ru.openmes.core.network.networkModule
 import ru.openmes.feature.auth.LoginViewModel
 import ru.openmes.feature.homework.HomeworkViewModel
 import ru.openmes.feature.marks.MarksViewModel
+import ru.openmes.feature.more.ApiConsoleViewModel
 import ru.openmes.feature.more.AttendanceViewModel
 import ru.openmes.feature.more.VisitsViewModel
 import ru.openmes.feature.more.FoodViewModel
 import ru.openmes.feature.more.NewsDetailViewModel
 import ru.openmes.feature.more.NewsViewModel
+import ru.openmes.feature.more.PortfolioViewModel
 import ru.openmes.feature.more.ProforientationViewModel
 import ru.openmes.feature.more.SchoolInfoViewModel
 import ru.openmes.feature.more.MoreViewModel
@@ -48,6 +52,9 @@ import ru.openmes.feature.more.StudentCardViewModel
 import ru.openmes.feature.schedule.ScheduleViewModel
 
 class OpenMESApp : Application(), SingletonImageLoader.Factory {
+
+    /** Общая область приложения: подписки на настройки/сессию живут, пока жив процесс. */
+    private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     override fun onCreate() {
         super.onCreate()
@@ -74,14 +81,14 @@ class OpenMESApp : Application(), SingletonImageLoader.Factory {
             }
             .build()
 
-    /** Уход приложения в фон — расписание в кэше могло обновиться: перерисовать виджет. */
+    /**
+     * Уход приложения в фон — расписание в кэше могло обновиться: перерисовать виджет и переставить напоминания.
+     * Фоновой работой: процесс в фоне могут заморозить посреди запроса.
+     */
     private fun wireWidgetRefresh() {
         androidx.lifecycle.ProcessLifecycleOwner.get().lifecycle.addObserver(object : androidx.lifecycle.DefaultLifecycleObserver {
             override fun onStop(owner: androidx.lifecycle.LifecycleOwner) {
-                CoroutineScope(Dispatchers.IO).launch {
-                    ru.openmes.app.widget.ScheduleWidget.refresh(this@OpenMESApp)
-                    LessonReminders.reschedule(this@OpenMESApp)
-                }
+                Reschedule.all(this@OpenMESApp)
             }
         })
     }
@@ -89,29 +96,28 @@ class OpenMESApp : Application(), SingletonImageLoader.Factory {
     /** Напоминания о парах и вечерние: будильники переставляются при каждой смене их настроек и при входе в аккаунт. */
     private fun wireReminders() {
         val koin = GlobalContext.get()
-        val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
         koin.get<SettingsRepository>().settings
             .map { Triple(it.lessonReminders, it.lessonReminderMinutes, it.lessonRemindersDistanceOnly) }
             .distinctUntilChanged()
-            .onEach { runCatching { LessonReminders.reschedule(this) } }
-            .launchIn(scope)
+            .onEach { runSuspendCatching { LessonReminders.reschedule(this) } }
+            .launchIn(appScope)
         koin.get<SettingsRepository>().settings
             .map { Triple(it.homeworkReminders, it.testReminders, it.eveningReminderHour) }
             .distinctUntilChanged()
-            .onEach { runCatching { EveningReminders.reschedule(this) } }
-            .launchIn(scope)
+            .onEach { runSuspendCatching { EveningReminders.reschedule(this) } }
+            .launchIn(appScope)
         koin.get<SettingsRepository>().settings
             .map { it.scheduleChangeNotifications }
             .distinctUntilChanged()
             .onEach { enabled ->
                 if (enabled) ScheduleChangesWorker.schedule(this) else ScheduleChangesWorker.cancel(this)
             }
-            .launchIn(scope)
+            .launchIn(appScope)
         koin.get<SessionRepository>().session
             .map { it is ru.openmes.core.data.Session.LoggedIn }
             .distinctUntilChanged()
-            .onEach { runCatching { LessonReminders.reschedule(this) } }
-            .launchIn(scope)
+            .onEach { runSuspendCatching { LessonReminders.reschedule(this) } }
+            .launchIn(appScope)
     }
 
     /** Фоновая проверка оценок включается/выключается из настроек. */
@@ -123,7 +129,7 @@ class OpenMESApp : Application(), SingletonImageLoader.Factory {
             .onEach { enabled ->
                 if (enabled) MarksPollWorker.schedule(this) else MarksPollWorker.cancel(this)
             }
-            .launchIn(CoroutineScope(SupervisorJob() + Dispatchers.Default))
+            .launchIn(appScope)
     }
 
     /**
@@ -135,7 +141,6 @@ class OpenMESApp : Application(), SingletonImageLoader.Factory {
         val settingsRepository = koin.get<SettingsRepository>()
         val offlineCache = koin.get<OfflineCache>()
         offlineCache.policy = runBlocking { settingsRepository.settings.first() }.cachePolicy
-        val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
         settingsRepository.settings
             .map { it.cachePolicy }
             .distinctUntilChanged()
@@ -143,14 +148,14 @@ class OpenMESApp : Application(), SingletonImageLoader.Factory {
                 offlineCache.policy = policy
                 offlineCache.cleanup()
             }
-            .launchIn(scope)
+            .launchIn(appScope)
         settingsRepository.settings
             .map { it.cacheEnabled && it.cacheBackgroundRefresh }
             .distinctUntilChanged()
             .onEach { enabled ->
                 if (enabled) CacheRefreshWorker.schedule(this) else CacheRefreshWorker.cancel(this)
             }
-            .launchIn(scope)
+            .launchIn(appScope)
     }
 
     /**
@@ -162,7 +167,7 @@ class OpenMESApp : Application(), SingletonImageLoader.Factory {
         val authenticator = koin.get<TokenAuthenticator>()
         val sessionRepository = koin.get<SessionRepository>()
         authenticator.onUnauthorized = {
-            CoroutineScope(Dispatchers.IO).launch {
+            appScope.launch {
                 sessionRepository.logout()
             }
         }
@@ -173,7 +178,7 @@ class OpenMESApp : Application(), SingletonImageLoader.Factory {
 private val appModule = module {
     viewModel { LoginViewModel(get()) }
     viewModel { ScheduleViewModel(get(), get()) }
-    viewModel { MarksViewModel(get(), get(), get()) }
+    viewModel { MarksViewModel(get(), get(), get(), get()) }
     viewModel { HomeworkViewModel(get(), get()) }
     viewModel { MoreViewModel(get(), get(), get()) }
     viewModel { CacheSettingsViewModel(get(), get()) }
@@ -186,4 +191,6 @@ private val appModule = module {
     viewModel { (id: Long) -> NewsDetailViewModel(id, get()) }
     viewModel { SchoolInfoViewModel(get(), get()) }
     viewModel { ProforientationViewModel(get(), get()) }
+    viewModel { PortfolioViewModel(get(), get()) }
+    viewModel { ApiConsoleViewModel(get()) }
 }

@@ -22,7 +22,6 @@ import androidx.compose.material.icons.rounded.AccountBalance
 import androidx.compose.material.icons.rounded.Badge
 import androidx.compose.material.icons.rounded.DoorFront
 import androidx.compose.material.icons.rounded.BakeryDining
-import androidx.compose.material.icons.rounded.Balance
 import androidx.compose.material.icons.rounded.Book
 import androidx.compose.material.icons.rounded.CalendarMonth
 import androidx.compose.material.icons.rounded.Campaign
@@ -74,8 +73,6 @@ private data class Service(
 
 /** Роадмап переноса из оригинала. */
 private val upcomingServices = listOf(
-    Service(Icons.Rounded.Balance, "Финансы", "Баланс, пополнение, история"),
-    Service(Icons.Rounded.WorkspacePremium, "Портфолио", "Достижения и олимпиады"),
     Service(Icons.Rounded.Extension, "Кружки", "Каталог и запись"),
     Service(Icons.Rounded.Celebration, "Геймификация", "Звёзды, подарки, турниры"),
     Service(Icons.Rounded.QrCode2, "Москвёнок", "QR-проход и идентификаторы"),
@@ -109,6 +106,7 @@ fun MoreScreen(
     onOpenNews: () -> Unit,
     onOpenSchoolInfo: () -> Unit,
     onOpenProforientation: () -> Unit,
+    onOpenPortfolio: () -> Unit,
     onOpenLibrary: () -> Unit,
 ) {
     val session by viewModel.session.collectAsStateWithLifecycle()
@@ -119,9 +117,10 @@ fun MoreScreen(
         Service(Icons.Rounded.SportsScore, "Посещаемость", "Пропуски с начала учебного года", onOpenAttendance),
         Service(Icons.Rounded.DoorFront, "Проходы", "Турникеты: приход, уход, время в колледже", onOpenVisits),
         Service(Icons.Rounded.Badge, "Студенческий билет", "Электронный билет колледжа", onOpenStudentCard),
-        Service(Icons.Rounded.BakeryDining, "Питание", "Меню столовой и буфета", onOpenFood),
+        Service(Icons.Rounded.BakeryDining, "Питание", "Меню, баланс и операции по счёту", onOpenFood),
         Service(Icons.Rounded.Campaign, "Новости", "Лента school.mos.ru", onOpenNews),
         Service(Icons.Rounded.AccountBalance, "О колледже", "Контакты, кураторы, корпуса", onOpenSchoolInfo),
+        Service(Icons.Rounded.WorkspacePremium, "Портфолио", "Олимпиады, конкурсы, награды и ГТО", onOpenPortfolio),
         Service(Icons.Rounded.Work, "Профориентация", "Тест, отрасли, дни открытых дверей", onOpenProforientation),
         Service(Icons.Rounded.Book, "Библиотека МЭШ", "Учебники и материалы", onOpenLibrary),
         Service(Icons.Rounded.Settings, "Настройки", "Тема, PIN-код, уведомления", onOpenSettings),

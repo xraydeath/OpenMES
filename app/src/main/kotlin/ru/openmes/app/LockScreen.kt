@@ -1,5 +1,6 @@
 package ru.openmes.app
 
+import android.content.Context
 import androidx.activity.compose.BackHandler
 import androidx.biometric.BiometricManager
 import androidx.biometric.BiometricManager.Authenticators.BIOMETRIC_WEAK
@@ -41,8 +42,10 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.toShape
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -53,14 +56,18 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
+import androidx.core.content.edit
 import androidx.fragment.app.FragmentActivity
 import ru.openmes.core.designsystem.components.ShapeIcon
 import ru.openmes.core.designsystem.components.rememberPressMorphShape
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 /**
  * Экран блокировки: PIN (4–8 цифр) и, если включено, биометрия.
  * При вводе ≥4 цифр PIN проверяется тихо; ошибка показывается только по «✓».
+ * Неверная комбинация засчитывается попыткой, когда её отправили или стёрли (дописать цифру — не попытка);
+ * после [FREE_PIN_ATTEMPTS] попыток ввод блокируется на растущее время (см. [PinAttempts]).
  */
 @Composable
 internal fun LockScreen(
@@ -68,10 +75,39 @@ internal fun LockScreen(
     checkPin: suspend (String) -> Boolean,
     onUnlock: () -> Unit,
 ) {
-    val activity = LocalContext.current as? FragmentActivity
+    val context = LocalContext.current
+    val activity = context as? FragmentActivity
     val scope = rememberCoroutineScope()
     var pin by remember { mutableStateOf("") }
     var error by remember { mutableStateOf(false) }
+
+    val attempts = remember { PinAttempts(context) }
+    var lockedUntil by remember { mutableLongStateOf(attempts.lockedUntil()) }
+    var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
+    val lockedOut = lockedUntil > now
+    LaunchedEffect(lockedUntil) {
+        while (true) {
+            now = System.currentTimeMillis()
+            if (now >= lockedUntil) break
+            delay(1_000)
+        }
+    }
+    // Комбинация, уже проверенная тихо и неверная, но ещё не засчитанная попыткой.
+    var wrongPin by remember { mutableStateOf<String?>(null) }
+    fun fail() {
+        attempts.registerFailure()
+        lockedUntil = attempts.lockedUntil()
+        now = System.currentTimeMillis()
+    }
+    fun unlock() {
+        attempts.reset()
+        wrongPin = null
+        onUnlock()
+    }
+    // Ушли с экрана с неверной комбинацией — тоже попытка (иначе перезапуск обходил бы счётчик).
+    DisposableEffect(Unit) {
+        onDispose { if (wrongPin != null) attempts.registerFailure() }
+    }
 
     val canUseBiometric = remember(biometricEnabled) {
         biometricEnabled && activity != null &&
@@ -84,7 +120,7 @@ internal fun LockScreen(
                 ContextCompat.getMainExecutor(activity),
                 object : BiometricPrompt.AuthenticationCallback() {
                     override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
-                        onUnlock()
+                        unlock()
                     }
                 },
             )
@@ -102,21 +138,38 @@ internal fun LockScreen(
     BackHandler { activity?.moveTaskToBack(true) }
 
     fun input(digit: Char) {
-        if (pin.length >= 8) return
+        if (lockedOut || pin.length >= 8) return
         pin += digit
+        wrongPin = null
         error = false
         if (pin.length >= 4) {
             val attempt = pin
-            scope.launch { if (checkPin(attempt)) onUnlock() }
+            scope.launch {
+                when {
+                    checkPin(attempt) -> unlock()
+                    pin == attempt -> wrongPin = attempt
+                    // Пока проверяли, комбинацию стёрли или заменили — попытка всё равно была.
+                    !pin.startsWith(attempt) -> fail()
+                }
+            }
         }
     }
 
+    fun erase() {
+        if (pin.isNotEmpty() && wrongPin == pin) fail()
+        wrongPin = null
+        pin = pin.dropLast(1)
+    }
+
     fun submit() {
+        if (lockedOut) return
         val attempt = pin
         scope.launch {
             if (checkPin(attempt)) {
-                onUnlock()
+                unlock()
             } else {
+                fail()
+                wrongPin = null
                 error = true
                 pin = ""
             }
@@ -156,10 +209,23 @@ internal fun LockScreen(
         )
         Spacer(Modifier.height(20.dp))
         Text(
-            if (error) "Неверный PIN-код" else "Введите PIN-код",
+            when {
+                lockedOut -> "Слишком много попыток"
+                error -> "Неверный PIN-код"
+                else -> "Введите PIN-код"
+            },
             style = MaterialTheme.typography.headlineSmallEmphasized,
-            color = if (error) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface,
+            color = if (error || lockedOut) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface,
         )
+        if (lockedOut) {
+            val seconds = (lockedUntil - now + 999) / 1_000
+            Spacer(Modifier.height(8.dp))
+            Text(
+                "Повторите через %d:%02d".format(seconds / 60, seconds % 60),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
         Spacer(Modifier.height(20.dp))
         // Индикатор: введённые цифры — «печенье», пустые места (до 4) — точки.
         Row(
@@ -209,13 +275,13 @@ internal fun LockScreen(
                         Icon(Icons.Rounded.Fingerprint, contentDescription = "Биометрия")
                     }
                 } else if (pin.isNotEmpty()) {
-                    BackspaceButton { pin = pin.dropLast(1) }
+                    BackspaceButton(::erase)
                 }
             }
             KeypadButton("0") { input('0') }
             Box(Modifier.size(KEY_SIZE), contentAlignment = Alignment.Center) {
                 if (canUseBiometric && pin.isNotEmpty()) {
-                    BackspaceButton { pin = pin.dropLast(1) }
+                    BackspaceButton(::erase)
                 } else if (pin.length >= 4) {
                     FilledIconButton(
                         onClick = ::submit,
@@ -240,6 +306,45 @@ internal fun LockScreen(
                 Text("Войти", style = MaterialTheme.typography.titleMedium)
             }
         }
+    }
+}
+
+/** Сколько неверных попыток без паузы. */
+internal const val FREE_PIN_ATTEMPTS = 5
+private const val BASE_LOCKOUT_MS = 30_000L
+private const val MAX_LOCKOUT_MS = 30 * 60_000L
+
+/** Пауза после [failures] неверных попыток: 30 с после пятой, дальше вдвое больше за каждую, но не больше 30 минут. */
+internal fun pinLockoutMillis(failures: Int): Long =
+    if (failures < FREE_PIN_ATTEMPTS) 0L
+    else (BASE_LOCKOUT_MS shl (failures - FREE_PIN_ATTEMPTS).coerceAtMost(6)).coerceAtMost(MAX_LOCKOUT_MS)
+
+/** Счётчик неверных PIN-кодов; в SharedPreferences, чтобы перезапуск приложения его не сбрасывал. */
+internal class PinAttempts(context: Context) {
+
+    private val prefs = context.getSharedPreferences("pin_attempts", Context.MODE_PRIVATE)
+
+    /** До какого момента (System.currentTimeMillis) ввод закрыт; в прошлом — открыт. */
+    fun lockedUntil(): Long =
+        // Часы перевели назад — дольше максимальной паузы всё равно не держим.
+        prefs.getLong(KEY_LOCKED_UNTIL, 0L).coerceAtMost(System.currentTimeMillis() + MAX_LOCKOUT_MS)
+
+    fun registerFailure() {
+        val failures = prefs.getInt(KEY_FAILURES, 0) + 1
+        val lockout = pinLockoutMillis(failures)
+        prefs.edit {
+            putInt(KEY_FAILURES, failures)
+            putLong(KEY_LOCKED_UNTIL, if (lockout > 0) System.currentTimeMillis() + lockout else 0L)
+        }
+    }
+
+    fun reset() {
+        prefs.edit { clear() }
+    }
+
+    private companion object {
+        const val KEY_FAILURES = "failures"
+        const val KEY_LOCKED_UNTIL = "locked_until"
     }
 }
 

@@ -14,6 +14,7 @@ import java.io.File
 import java.io.IOException
 import java.security.MessageDigest
 import java.time.LocalDate
+import java.util.concurrent.atomic.AtomicLong
 
 /**
  * Офлайн-кэш ответов МЭШ: удачные GET-ответы пишутся на диск, а без сети (или при 5xx)
@@ -29,6 +30,14 @@ class OfflineCache(private val dir: File) {
     val offlineDataTime: StateFlow<Long?> = _offlineDataTime.asStateFlow()
 
     private val lock = Any()
+
+    private val servedCount = AtomicLong()
+
+    /**
+     * Сколько раз с запуска ответ отдали из кэша вместо сети. Кэш в памяти сравнивает значение
+     * до и после загрузки: изменилось — данные могли прийти из кэша, как свежие их не держим.
+     */
+    val servedFromCacheCount: Long get() = servedCount.get()
 
     @Volatile
     var policy: CachePolicy = CachePolicy()
@@ -60,6 +69,7 @@ class OfflineCache(private val dir: File) {
     }
 
     internal fun onServedFromCache(savedAt: Long) {
+        servedCount.incrementAndGet()
         // Показываем самое старое из отданного — чтобы не приукрашивать свежесть.
         _offlineDataTime.value = _offlineDataTime.value?.let { minOf(it, savedAt) } ?: savedAt
     }
@@ -124,10 +134,17 @@ class OfflineCache(private val dir: File) {
             .forEach { it.delete() }
     }
 
-    private companion object {
-        const val MAX_ENTRIES = 400
+    companion object {
+        private const val MAX_ENTRIES = 400
+
+        /** Заголовок, которым помечены ответы из офлайн-кэша. */
+        const val HEADER_FROM_CACHE = "X-OpenMES-Offline-Cache"
     }
 }
+
+/** Ответ отдан из офлайн-кэша, а не из сети. */
+fun Response.isFromOfflineCache(): Boolean = header(OfflineCache.HEADER_FROM_CACHE) != null
+
 
 /**
  * Должен стоять первым в цепочке: видит исходные пути (до CollegeRouting).
@@ -154,6 +171,8 @@ class OfflineCacheInterceptor(
         val response = try {
             chain.proceed(request)
         } catch (e: IOException) {
+            // Отменённый запрос (ушли с экрана) — не «нет сети»: кэш и баннер офлайна ни к чему.
+            if (chain.call().isCanceled()) throw e
             return fromCache() ?: throw e
         }
         if (response.code >= 500) {
@@ -181,22 +200,32 @@ class OfflineCacheInterceptor(
     private fun exactKey(request: Request, section: CacheSection): String =
         key(section, "exact", request.url.toString())
 
-    /** Для «плавающих» диапазонов (оценки за 28 дней, ДЗ на две недели) — ключ без дат. */
+    /**
+     * Для «плавающих» диапазонов (оценки за 28 дней, ДЗ на две недели) — ключ без дат.
+     * Только для текущего диапазона (задевает сегодня): иначе просмотр прошлого месяца
+     * перезаписал бы «текущие» данные, и без сети показался бы чужой период.
+     */
     private fun aliasKey(request: Request, section: CacheSection): String? {
         val path = request.url.encodedPath.removePrefix("/")
-        return if (EXACT_ONLY.none { path.startsWith(it) }) key(section, "alias", alias(request.url)) else null
+        if (EXACT_ONLY.any { path.startsWith(it) }) return null
+        val dates = datesOf(request.url)
+        val today = LocalDate.now()
+        if (dates.isNotEmpty() && (dates.min() > today || dates.max() < today)) return null
+        return key(section, "alias", alias(request.url))
     }
 
     /** Диапазон дат запроса задевает ±[windowDays] от сегодня (запросы без дат проходят всегда). */
     private fun inWindow(url: HttpUrl, windowDays: Int?): Boolean {
         if (windowDays == null) return true
-        val dates = url.queryParameterNames
-            .flatMap { url.queryParameterValues(it) }
-            .mapNotNull { value -> value?.takeIf(DATE::matches)?.let { runCatching { LocalDate.parse(it.take(10)) }.getOrNull() } }
+        val dates = datesOf(url)
         if (dates.isEmpty()) return true
         val today = LocalDate.now()
         return dates.max() >= today.minusDays(windowDays.toLong()) && dates.min() <= today.plusDays(windowDays.toLong())
     }
+
+    private fun datesOf(url: HttpUrl): List<LocalDate> = url.queryParameterNames
+        .flatMap { url.queryParameterValues(it) }
+        .mapNotNull { value -> value?.takeIf(DATE::matches)?.let { runCatching { LocalDate.parse(it.take(10)) }.getOrNull() } }
 
     /** Ответ из кэша; время сохранения — в sentRequestAtMillis. */
     private fun cachedResponse(request: Request, section: CacheSection): Response? {
@@ -207,6 +236,7 @@ class OfflineCacheInterceptor(
             .protocol(Protocol.HTTP_1_1)
             .code(200)
             .message("OK (offline cache)")
+            .header(OfflineCache.HEADER_FROM_CACHE, "1")
             .sentRequestAtMillis(savedAt)
             .receivedResponseAtMillis(savedAt)
             .body(body.toResponseBody("application/json".toMediaType()))

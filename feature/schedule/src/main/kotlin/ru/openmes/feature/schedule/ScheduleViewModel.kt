@@ -7,6 +7,8 @@ import androidx.lifecycle.ProcessLifecycleOwner
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.launchIn
@@ -212,8 +214,15 @@ class ScheduleViewModel(
     var pdfExporting by mutableStateOf(false)
         private set
 
-    /** PDF расписания недели [monday]..+6 → файл в [dir]. */
-    fun exportWeekPdf(monday: LocalDate, dir: File, onResult: (Result<File>) -> Unit) {
+    /**
+     * Результаты выгрузки PDF — одноразовые события для экрана. Не колбэк: лямбда с контекстом
+     * Activity в viewModelScope пережила бы поворот и держала мёртвую Activity.
+     */
+    private val _pdfResults = Channel<Result<File>>(Channel.BUFFERED)
+    val pdfResults = _pdfResults.receiveAsFlow()
+
+    /** PDF расписания недели [monday]..+6 → файл в [dir], результат — в [pdfResults]. */
+    fun exportWeekPdf(monday: LocalDate, dir: File) {
         val childId = loadedChildId ?: return
         if (pdfExporting) return
         pdfExporting = true
@@ -227,7 +236,7 @@ class ScheduleViewModel(
                 }
             }
             pdfExporting = false
-            onResult(result)
+            _pdfResults.send(result)
         }
     }
 
@@ -290,7 +299,8 @@ class ScheduleViewModel(
 
     fun selectDate(date: LocalDate) {
         if (_state.value.selectedDate == date) return
-        _state.update { it.copy(selectedDate = date) }
+        // Ошибка относилась к прошлому выбору; если месяц новой даты не загрузится — loadMonth покажет её заново.
+        _state.update { it.copy(selectedDate = date, error = null) }
         ensureMonth(YearMonth.from(date))
         // Неделя у края месяца захватывает соседний — подгружаем его заранее.
         if (date.dayOfMonth <= 7) ensureMonth(YearMonth.from(date).minusMonths(1))
@@ -366,7 +376,11 @@ class ScheduleViewModel(
             val idle = inFlight.isEmpty()
             _state.update { st ->
                 if (lessons != null) {
-                    st.withMonths(st.months + (month to lessons)).copy(loading = !idle, refreshing = st.refreshing && !idle)
+                    st.withMonths(st.months + (month to lessons)).copy(
+                        loading = !idle,
+                        refreshing = st.refreshing && !idle,
+                        error = if (month == YearMonth.from(st.selectedDate)) null else st.error,
+                    )
                 } else if (month == YearMonth.from(st.selectedDate)) {
                     st.copy(
                         loading = !idle,

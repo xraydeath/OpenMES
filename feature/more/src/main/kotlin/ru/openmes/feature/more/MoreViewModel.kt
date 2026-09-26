@@ -9,7 +9,9 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
@@ -42,7 +44,7 @@ class MoreViewModel(
             sessionRepository.session
                 .map { (it as? Session.LoggedIn)?.currentChild?.personGuid }
                 .distinctUntilChanged()
-                .collect { guid -> loadAvatar(guid) }
+                .collectLatest { guid -> loadAvatar(guid) }
         }
     }
 
@@ -52,7 +54,8 @@ class MoreViewModel(
         if (personGuid == null) return
         _avatar.value = diaryRepository.getSavedAvatar(personGuid)?.decodeBitmap()
         runSuspendCatching { diaryRepository.getAvatar(personGuid) }
-            .onSuccess { bytes -> _avatar.value = bytes?.decodeBitmap() }
+            // null — аватара нет или сервер его не отдал: уже показанный сохранённый не стираем.
+            .onSuccess { bytes -> bytes?.decodeBitmap()?.let { _avatar.value = it } }
     }
 
     private suspend fun ByteArray.decodeBitmap(): ImageBitmap? = withContext(Dispatchers.Default) {
@@ -71,14 +74,6 @@ class MoreViewModel(
         settingsRepository.setDynamicColor(enabled)
     }
 
-    fun setMarksNotifications(enabled: Boolean) = viewModelScope.launch {
-        settingsRepository.setMarksNotifications(enabled)
-    }
-
-    fun setHideMarkValues(enabled: Boolean) = viewModelScope.launch {
-        settingsRepository.setHideMarkValues(enabled)
-    }
-
     fun setPin(pin: String?) = viewModelScope.launch {
         settingsRepository.setPin(pin)
     }
@@ -91,3 +86,10 @@ class MoreViewModel(
         sessionRepository.logout()
     }
 }
+
+/**
+ * id текущего ребёнка; эмитит только при его смене (вход, выход, переключение ребёнка),
+ * а не на каждое обновление сессии.
+ */
+internal fun SessionRepository.currentChildIdChanges(): Flow<String?> =
+    session.map { (it as? Session.LoggedIn)?.currentChild?.id }.distinctUntilChanged()

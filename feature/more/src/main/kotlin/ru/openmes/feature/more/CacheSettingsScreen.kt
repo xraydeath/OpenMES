@@ -20,6 +20,7 @@ import androidx.compose.material.icons.rounded.Grade
 import androidx.compose.material.icons.rounded.Newspaper
 import androidx.compose.material.icons.rounded.Restaurant
 import androidx.compose.material.icons.rounded.Storage
+import androidx.compose.material.icons.rounded.WorkspacePremium
 import androidx.compose.material.icons.rounded.Sync
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -265,12 +266,13 @@ private fun CacheSection.presentation(): Triple<ImageVector, String, String?> = 
     CacheSection.SCHEDULE -> Triple(Icons.Rounded.CalendarMonth, "Расписание", "Уроки и их подробности; без него виджет работает только с сетью")
     CacheSection.CALENDAR -> Triple(Icons.Rounded.EventNote, "Календарь", "Каникулы, выходные и переносы рабочих дней")
     CacheSection.PLAN -> Triple(Icons.Rounded.Quiz, "Темы и контрольные", "Модули и темы уроков, отметки контрольных")
-    CacheSection.MARKS -> Triple(Icons.Rounded.Grade, "Оценки", "Текущие, итоговые и аттестация")
+    CacheSection.MARKS -> Triple(Icons.Rounded.Grade, "Оценки", "Текущие, итоговые, годовые и аттестация")
     CacheSection.HOMEWORK -> Triple(Icons.AutoMirrored.Rounded.MenuBook, "Домашние задания", null)
-    CacheSection.ATTENDANCE -> Triple(Icons.Rounded.EventAvailable, "Посещаемость", "Пропуски и опоздания")
+    CacheSection.ATTENDANCE -> Triple(Icons.Rounded.EventAvailable, "Посещаемость", "Пропуски, опоздания и справки ЕМИАС")
     CacheSection.VISITS -> Triple(Icons.Rounded.DoorFront, "Проходы", "Входы и выходы через турникеты")
-    CacheSection.FOOD -> Triple(Icons.Rounded.Restaurant, "Питание", "Меню, баланс")
+    CacheSection.FOOD -> Triple(Icons.Rounded.Restaurant, "Питание", "Меню, баланс и операции по счёту")
     CacheSection.NEWS -> Triple(Icons.Rounded.Newspaper, "Новости", null)
+    CacheSection.PORTFOLIO -> Triple(Icons.Rounded.WorkspacePremium, "Портфолио", "Олимпиады, конкурсы и награды")
     CacheSection.PROFILE -> Triple(Icons.Rounded.Badge, "Студбилет, колледж, профориентация", null)
     CacheSection.SESSION -> Triple(Icons.Rounded.Storage, "Профиль для входа", null)
 }

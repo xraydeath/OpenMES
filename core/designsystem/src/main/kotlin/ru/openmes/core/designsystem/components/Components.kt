@@ -334,7 +334,9 @@ fun <T> ConnectedChoiceGroup(
             ToggleButton(
                 checked = checked,
                 onCheckedChange = { onSelect(option) },
-                modifier = (if (fill) Modifier.weight(1f) else Modifier)
+                // Ширина по длине подписи (+ запас на отступы): при равных весах длинная подпись
+                // обрезается на узком экране, хотя соседям место не нужно.
+                modifier = (if (fill) Modifier.weight(label(option).length + 2f) else Modifier)
                     .semantics { role = Role.RadioButton },
                 // Внешние края — полукруг, внутренние — плоские; форма не меняется при выборе.
                 shapes = when {
@@ -365,15 +367,21 @@ private fun fixedToggleShapes(shape: Shape) = ToggleButtonShapes(shape = shape, 
 // Оценки: тональные пары + форма по значению (MaterialShapes)
 // ---------------------------------------------------------------------------
 
+private val MarkTrailingZeros = Regex("""\.0+$""")
+
+/** Значение оценки для сравнения: «5,0» и « 5.00 » → «5». */
+private fun normalizeMark(value: String?): String? =
+    value?.trim()?.replace(',', '.')?.replace(MarkTrailingZeros, "")
+
 /** Тональные цвета плашки оценки с учётом темы. */
 @Composable
 fun markTone(value: String?): MarkTone {
     val dark = LocalDarkTheme.current
-    return when (value?.trim()?.replace(',', '.')) {
-        "5", "5.0", "Зач", "Зачёт", "зачёт", "З", "зачтено" -> if (dark) MarkToneFiveDark else MarkToneFiveLight
-        "4", "4.0" -> if (dark) MarkToneFourDark else MarkToneFourLight
-        "3", "3.0" -> if (dark) MarkToneThreeDark else MarkToneThreeLight
-        "2", "1", "2.0", "1.0" -> if (dark) MarkToneTwoDark else MarkToneTwoLight
+    return when (normalizeMark(value)) {
+        "5", "Зач", "Зачёт", "зачёт", "З", "зачтено" -> if (dark) MarkToneFiveDark else MarkToneFiveLight
+        "4" -> if (dark) MarkToneFourDark else MarkToneFourLight
+        "3" -> if (dark) MarkToneThreeDark else MarkToneThreeLight
+        "2", "1" -> if (dark) MarkToneTwoDark else MarkToneTwoLight
         null, "" -> MarkTone(
             MaterialTheme.colorScheme.surfaceContainerHighest,
             MaterialTheme.colorScheme.onSurfaceVariant,
@@ -388,7 +396,7 @@ fun markTone(value: String?): MarkTone {
 
 /** Форма плашки по значению: «пятёрка» — печенье, «двойка» — клевер. */
 @Composable
-fun markShape(value: String?): Shape = when (value?.trim()) {
+fun markShape(value: String?): Shape = when (normalizeMark(value)) {
     "5" -> MaterialShapes.Cookie9Sided.toShape()
     "4" -> MaterialShapes.Cookie6Sided.toShape()
     "3" -> MaterialShapes.Square.toShape()

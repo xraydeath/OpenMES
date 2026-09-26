@@ -87,11 +87,13 @@ import ru.openmes.feature.auth.LoginScreen
 import ru.openmes.feature.homework.HomeworkScreen
 import ru.openmes.feature.homework.openLibrary
 import ru.openmes.feature.marks.MarksScreen
+import ru.openmes.feature.more.ApiConsoleScreen
 import ru.openmes.feature.more.AttendanceScreen
 import ru.openmes.feature.more.VisitsScreen
 import ru.openmes.feature.more.FoodScreen
 import ru.openmes.feature.more.NewsDetailScreen
 import ru.openmes.feature.more.NewsScreen
+import ru.openmes.feature.more.PortfolioScreen
 import ru.openmes.feature.more.ProforientationScreen
 import ru.openmes.feature.more.SchoolInfoScreen
 import ru.openmes.feature.more.MoreScreen
@@ -131,9 +133,11 @@ private val screenTitles = mapOf(
     "news/{id}" to "Новость",
     "school_info" to "О колледже",
     "proforientation" to "Профориентация",
+    "portfolio" to "Портфолио",
     "settings" to "Настройки",
     "cache_settings" to "Кэш и офлайн",
     "notification_settings" to "Уведомления",
+    "api_console" to "Консоль API",
 )
 
 private val authRoutes = setOf("login")
@@ -261,6 +265,7 @@ fun AppNavHost() {
                         onOpenNews = { navController.navigate("news") },
                         onOpenSchoolInfo = { navController.navigate("school_info") },
                         onOpenProforientation = { navController.navigate("proforientation") },
+                        onOpenPortfolio = { navController.navigate("portfolio") },
                         onOpenLibrary = { context.openLibrary() },
                     )
                 }
@@ -304,12 +309,21 @@ fun AppNavHost() {
                     ProforientationScreen(viewModel = koinViewModel())
                 }
 
+                composable("portfolio") {
+                    PortfolioScreen(viewModel = koinViewModel())
+                }
+
                 composable("settings") {
                     SettingsScreen(
                         viewModel = koinViewModel(),
                         onOpenCache = { navController.navigate("cache_settings") },
                         onOpenNotifications = { navController.navigate("notification_settings") },
+                        onOpenApiConsole = { navController.navigate("api_console") },
                     )
+                }
+
+                composable("api_console") {
+                    ApiConsoleScreen(viewModel = koinViewModel())
                 }
 
                 composable("notification_settings") {
@@ -444,12 +458,23 @@ private fun OfflineBanner(savedAt: Long) {
 @Composable
 private fun AuthDeepLinkHandler(sessionRepository: SessionRepository) {
     val activity = LocalContext.current as? ComponentActivity ?: return
+    // Переживает пересоздание Activity и смерть процесса: система вернёт исходный intent со ссылкой.
+    val launchLinkHandled = androidx.compose.runtime.saveable.rememberSaveable {
+        androidx.compose.runtime.mutableStateOf(false)
+    }
 
     LaunchedEffect(activity) {
-        activity.intent?.data
-            ?.takeIf { it.scheme == "diary-po" }
-            ?.let { sessionRepository.handleDeepLink(it.toString()) }
-        activity.intent?.data = null // не обрабатываем повторно
+        val intent = activity.intent
+        // Запуск из «Недавних» повторно доставляет старый intent с уже использованным code.
+        val fromHistory = intent != null &&
+            (intent.flags and android.content.Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY) != 0
+        if (!launchLinkHandled.value && !fromHistory) {
+            intent?.data
+                ?.takeIf { it.scheme == "diary-po" }
+                ?.let { sessionRepository.handleDeepLink(it.toString()) }
+        }
+        launchLinkHandled.value = true
+        intent?.data = null // не обрабатываем повторно
     }
 
     DisposableEffect(activity) {

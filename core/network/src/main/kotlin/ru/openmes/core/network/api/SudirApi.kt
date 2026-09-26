@@ -83,14 +83,10 @@ interface MeshAuthApi {
         @Body body: SudirAuthRequest,
     ): SudirAuthResponse
 
-    /** POST /v3/token/refresh (201) → новые access/refresh. */
-    @FormUrlEncoded
-    @POST("v3/token/refresh")
-    suspend fun refreshToken(
-        @FieldMap form: Map<String, String>,
-    ): MeshRefreshResponse
-
-    /** GET acl/api/users/profile_info → массив профилей (как OctoDiary-py, dnevnik.mos.ru). */
+    /**
+     * GET acl/api/users/profile_info → массив профилей (как OctoDiary-py, dnevnik.mos.ru).
+     * Им же активируется новый mesh_access_token после обновления (CollegeRouting перепишет путь).
+     */
     @GET("acl/api/users/profile_info")
     suspend fun getProfileInfo(
         @Header("Auth-Token") authToken: String,
@@ -123,12 +119,6 @@ data class SudirAuthResponse(
         @SerialName("mesh_refresh_token") val meshRefreshToken: String = "",
     )
 }
-
-@Serializable
-data class MeshRefreshResponse(
-    @SerialName("access_token") val accessToken: String = "",
-    @SerialName("refresh_token") val refreshToken: String = "",
-)
 
 @Serializable
 data class ProfileInfoDto(

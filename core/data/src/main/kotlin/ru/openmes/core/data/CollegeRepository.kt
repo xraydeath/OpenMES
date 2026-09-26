@@ -3,9 +3,14 @@ package ru.openmes.core.data
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import ru.openmes.core.common.runSuspendCatching
+import ru.openmes.core.model.FinalMark
+import ru.openmes.core.model.FinalMarksYear
 import ru.openmes.core.model.NewsBlock
 import ru.openmes.core.model.NewsItem
 import ru.openmes.core.model.NewsPage
+import ru.openmes.core.model.Portfolio
+import ru.openmes.core.model.PortfolioEvent
+import ru.openmes.core.model.PortfolioReward
 import ru.openmes.core.model.ProfCollege
 import ru.openmes.core.model.ProfEvent
 import ru.openmes.core.model.ProfIndustry
@@ -22,7 +27,7 @@ import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
 import java.util.Base64
 
-/** Сервисы колледжа вокруг дневника: новости, сведения об организации, профориентация, QR билета. */
+/** Сервисы колледжа вокруг дневника: новости, сведения об организации, профориентация, портфолио, QR билета. */
 interface CollegeRepository {
 
     /** Выполнить [block] только по офлайн-кэшу, без сети; null — в кэше нет. */
@@ -36,6 +41,11 @@ interface CollegeRepository {
     suspend fun getSchoolInfo(force: Boolean = false): SchoolInfo
 
     suspend fun getProforientation(force: Boolean = false): Proforientation
+
+    suspend fun getPortfolio(force: Boolean = false): Portfolio
+
+    /** Годовые оценки по учебным годам, свежие сверху. */
+    suspend fun getFinalMarks(force: Boolean = false): List<FinalMarksYear>
 
     /** PNG QR-кода студенческого билета. */
     suspend fun getStudentCardQr(studentId: String): ByteArray
@@ -51,6 +61,8 @@ class MesCollegeRepository(
     private val offlineCache: OfflineCache? = null,
     /** Тот же репозиторий поверх кэш-only API (без сети). */
     private val cached: CollegeRepository? = null,
+    /** false — без кэша в памяти (репозиторий поверх кэш-only API). */
+    memoryCache: Boolean = true,
 ) : CollegeRepository {
 
     override suspend fun <T> cachedOnly(block: suspend CollegeRepository.() -> T): T? {
@@ -58,17 +70,7 @@ class MesCollegeRepository(
         return runSuspendCatching { repo.block() }.getOrNull()
     }
 
-    private val memory = MemoryCache(ttlMillis = 10 * 60_000L)
-
-    private suspend fun <T> apiCall(block: suspend () -> T): T = try {
-        block()
-    } catch (e: retrofit2.HttpException) {
-        val body = runCatching { e.response()?.errorBody()?.string() }.getOrNull()
-        throw IllegalStateException(
-            "HTTP ${e.code()} ${e.message()}" + (body?.take(300)?.let { ": $it" } ?: ""),
-            e,
-        )
-    }
+    private val memory = MemoryCache(ttlMillis = 10 * 60_000L, offlineCache = offlineCache, enabled = memoryCache)
 
     override suspend fun getNews(page: Int, force: Boolean): NewsPage = memory.get("news_$page", force) { getNewsRemote(page) }
 
@@ -149,6 +151,88 @@ class MesCollegeRepository(
             history = dto.events?.history?.data.toEvents().sortedByDescending { it.date },
         )
     }
+
+    override suspend fun getPortfolio(force: Boolean): Portfolio {
+        val guid = personGuid()
+        return memory.get("portfolio_$guid", force) { getPortfolioRemote(guid) }
+    }
+
+    private suspend fun getPortfolioRemote(guid: String): Portfolio = apiCall {
+        val rewards = portalApi.getPortfolioRewards(guid).data.filterNot { it.isDelete }
+        // Награда за олимпиаду ссылается на мероприятие: показываем её прямо на нём.
+        val eventRewards = rewards.filter { it.entityType == "event" && it.entityId != null }
+            .associate { it.entityId to it.name }
+        val events = portalApi.getPortfolioEvents(guid).data.filterNot { it.isDelete }.map { e ->
+            PortfolioEvent(
+                name = e.name.trim(),
+                date = parseIsoDate(e.startDate) ?: parseIsoDate(e.endDate),
+                stage = e.stageEvent?.takeIf { it.isNotBlank() },
+                format = e.format?.value,
+                subjects = e.subjects.mapNotNull { it.value?.takeIf(String::isNotBlank) },
+                category = e.category?.value,
+                score = e.result?.toDoubleOrNull(),
+                maxScore = e.maxScore?.takeIf { it > 0 },
+                reward = eventRewards[e.id.toString()],
+            )
+        }
+        val sport = portalApi.getSportRewards(guid).data.filterNot { it.isDelete }.map { r ->
+            PortfolioReward(
+                name = r.name.trim(),
+                date = parseIsoDate(r.date),
+                sport = true,
+                source = r.type?.value,
+                details = r.ageLimit?.value,
+                number = r.rewardNumber?.takeIf { it.isNotBlank() },
+                expireDate = parseIsoDate(r.expireDate),
+            )
+        }
+        Portfolio(
+            events = events.sortedByDescending { it.date },
+            rewards = (sport + rewards.map { r ->
+                PortfolioReward(
+                    name = r.name.trim(),
+                    date = parseIsoDate(r.date),
+                    source = r.source?.value,
+                )
+            }).sortedByDescending { it.date },
+        )
+    }
+
+    override suspend fun getFinalMarks(force: Boolean): List<FinalMarksYear> {
+        val guid = personGuid()
+        return memory.get("final_marks_$guid", force) { getFinalMarksRemote(guid) }
+    }
+
+    private suspend fun getFinalMarksRemote(guid: String): List<FinalMarksYear> = apiCall {
+        portalApi.getFinalMarks(guid).data.map { y ->
+            FinalMarksYear(
+                title = y.yearTitle?.takeIf { it.isNotBlank() },
+                year = y.year?.toIntOrNull(),
+                level = y.educationLevel?.takeIf { it.isNotBlank() },
+                average = y.averageAllSubjects?.takeIf { it > 0 },
+                marks = y.subjects.mapNotNull { m ->
+                    val raw = m.yearValue?.takeIf { it.isNotBlank() } ?: return@mapNotNull null
+                    val credit = m.gradeSystemType?.value?.contains("Зачет", ignoreCase = true) == true
+                    FinalMark(
+                        subject = m.name.trim(),
+                        value = when {
+                            credit && raw == "1" -> "зачёт"
+                            credit && raw == "0" -> "незачёт"
+                            else -> raw
+                        },
+                        numeric = if (credit) null else m.yearFivePointValue ?: raw.toIntOrNull(),
+                        gradeSystem = m.gradeSystemType?.value,
+                    )
+                }.sortedBy { it.subject },
+            )
+        }.sortedWith(compareByDescending<FinalMarksYear> { it.title }.thenByDescending { it.year })
+    }
+
+    private suspend fun personGuid(): String =
+        tokenStore.load()?.personGuid ?: error("Нет активного профиля — войдите заново")
+
+    private fun parseIsoDate(value: String?): LocalDate? =
+        value?.let { runCatching { LocalDate.parse(it.take(10)) }.getOrNull() }
 
     override suspend fun getStudentCardQr(studentId: String): ByteArray = apiCall {
         val base64 = mesApi.getStudentCardQr(studentId).qrCode ?: error("Сервер не вернул QR-код")

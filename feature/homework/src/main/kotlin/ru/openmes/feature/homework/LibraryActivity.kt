@@ -1,14 +1,18 @@
 package ru.openmes.feature.homework
 
 import android.annotation.SuppressLint
+import android.app.DownloadManager
 import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
+import android.os.Environment
 import android.view.ViewGroup
 import android.webkit.CookieManager
+import android.webkit.URLUtil
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceRequest
 import android.webkit.WebView
@@ -173,8 +177,10 @@ class LibraryActivity : ComponentActivity() {
                     if (!pageTitle.isNullOrBlank() && !pageTitle.startsWith("http")) barTitle = pageTitle
                 }
             }
-            // Файлы из материалов (pdf, doc…) WebView не показывает — отдаём системе.
-            setDownloadListener { url, _, _, _, _ -> openExternal(url) }
+            // Файлы из материалов (pdf, doc…) WebView не показывает — качаем сами, с куками библиотеки.
+            setDownloadListener { url, userAgent, contentDisposition, mimeType, _ ->
+                download(url, userAgent, contentDisposition, mimeType)
+            }
 
             webView = this
             if (savedInstanceState?.let { restoreState(it) } == null) {
@@ -310,11 +316,63 @@ class LibraryActivity : ComponentActivity() {
         cookies.flush()
     }
 
+    /**
+     * Скачивание через DownloadManager: внешний браузер не знает кук сессии библиотеки и получил бы 403.
+     * С Android 10 — в общие «Загрузки» без разрешений; раньше туда нужен WRITE_EXTERNAL_STORAGE,
+     * поэтому — в папку приложения (файл открывается из уведомления о загрузке).
+     */
+    private fun download(url: String, userAgent: String?, contentDisposition: String?, mimeType: String?) {
+        val uri = Uri.parse(url)
+        // blob:/data: DownloadManager не умеет — пусть разбирается система.
+        if (uri.scheme != "http" && uri.scheme != "https") {
+            openExternal(url)
+            return
+        }
+        val fileName = URLUtil.guessFileName(url, contentDisposition, mimeType)
+        runCatching {
+            val request = DownloadManager.Request(uri)
+                .setTitle(fileName)
+                .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
+            mimeType?.takeIf { it.isNotBlank() }?.let(request::setMimeType)
+            userAgent?.takeIf { it.isNotBlank() }?.let { request.addRequestHeader("User-Agent", it) }
+            CookieManager.getInstance().getCookie(url)?.let { request.addRequestHeader("Cookie", it) }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                request.setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, fileName)
+            } else {
+                request.setDestinationInExternalFilesDir(this, Environment.DIRECTORY_DOWNLOADS, fileName)
+            }
+            getSystemService(DownloadManager::class.java).enqueue(request)
+        }.onSuccess {
+            Toast.makeText(this, "Скачивается: $fileName", Toast.LENGTH_SHORT).show()
+        }.onFailure {
+            // DownloadManager отключён или недоступен — хотя бы через браузер.
+            openExternal(url)
+        }
+    }
+
     private fun openExternal(url: String) {
+        val intent = if (url.startsWith("intent:", ignoreCase = true)) {
+            // intent://…#Intent;…;end — разбираем как Chrome: только BROWSABLE-активности,
+            // без явного компонента/селектора (иначе страница могла бы запустить что угодно).
+            runCatching { Intent.parseUri(url, Intent.URI_INTENT_SCHEME) }.getOrNull()?.apply {
+                addCategory(Intent.CATEGORY_BROWSABLE)
+                component = null
+                selector = null
+            } ?: return
+        } else {
+            Intent(Intent.ACTION_VIEW, Uri.parse(url))
+        }
         try {
-            startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+            startActivity(intent)
         } catch (_: ActivityNotFoundException) {
-            Toast.makeText(this, "Нет приложения для открытия ссылки", Toast.LENGTH_SHORT).show()
+            // Приложения нет — запасная ссылка страницы (как делает Chrome), http(s) — прямо здесь.
+            val fallback = intent.getStringExtra(EXTRA_BROWSER_FALLBACK_URL)
+                ?.takeIf { it.startsWith("http://") || it.startsWith("https://") }
+            if (fallback != null) {
+                webView?.loadUrl(fallback)
+            } else {
+                Toast.makeText(this, "Нет приложения для открытия ссылки", Toast.LENGTH_SHORT).show()
+            }
         } catch (_: Exception) {
             // Битый intent: из страницы.
         }
@@ -341,5 +399,6 @@ class LibraryActivity : ComponentActivity() {
         private const val MOSCOW_REGION = "77"
         private const val STATE_AUTH_TRIED = "authTried"
         private const val SESSION_REFRESH = "acl/api/session/v2/refresh"
+        private const val EXTRA_BROWSER_FALLBACK_URL = "browser_fallback_url"
     }
 }

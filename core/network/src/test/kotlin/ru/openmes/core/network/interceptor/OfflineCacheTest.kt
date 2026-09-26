@@ -54,7 +54,13 @@ class OfflineCacheTest {
     private fun OkHttpClient.get(url: String): Pair<Int, String> =
         newCall(Request.Builder().url(url).build()).execute().use { it.code to it.body!!.string() }
 
-    private val homeworks = "https://school.mos.ru/api/family/mobile/v1/homeworks/short?student_id=1&from=2026-09-21&to=2026-10-07"
+    private val today = java.time.LocalDate.now()
+
+    private fun homeworksUrl(from: java.time.LocalDate, to: java.time.LocalDate) =
+        "https://school.mos.ru/api/family/mobile/v1/homeworks/short?student_id=1&from=$from&to=$to"
+
+    /** Текущий диапазон: задевает сегодня. */
+    private val homeworks = homeworksUrl(today.minusDays(5), today.plusDays(11))
 
     @Test
     fun `новый ответ заменяет старый в кэше`() {
@@ -80,8 +86,60 @@ class OfflineCacheTest {
     fun `плавающий диапазон дат берётся по ключу без дат`() {
         client.get(homeworks)
         online = false
-        val tomorrow = "https://school.mos.ru/api/family/mobile/v1/homeworks/short?student_id=1&from=2026-09-22&to=2026-10-08"
+        val tomorrow = homeworksUrl(today.minusDays(4), today.plusDays(12))
         assertEquals(200 to """{"v":1}""", client.get(tomorrow))
+    }
+
+    @Test
+    fun `прошлый период не перезаписывает текущий`() {
+        client.get(homeworks)
+        body = """{"v":"past"}"""
+        val past = homeworksUrl(today.minusDays(60), today.minusDays(30))
+        client.get(past)
+        online = false
+        // Текущий «плавающий» диапазон — по-прежнему из текущих данных.
+        assertEquals(200 to """{"v":1}""", client.get(homeworksUrl(today.minusDays(4), today.plusDays(12))))
+        // Сам прошлый период — по точному ключу.
+        assertEquals(200 to """{"v":"past"}""", client.get(past))
+    }
+
+    @Test
+    fun `чужой прошлый период без сети не подменяется текущим`() {
+        client.get(homeworks)
+        online = false
+        val otherPast = homeworksUrl(today.minusDays(90), today.minusDays(70))
+        assertEquals(504, cacheOnlyClient.get(otherPast).first)
+    }
+
+    @Test
+    fun `отменённый запрос не берётся из кэша`() {
+        client.get(homeworks)
+        val cancelling = OkHttpClient.Builder()
+            .addInterceptor(OfflineCacheInterceptor(cache))
+            .addInterceptor { chain ->
+                chain.call().cancel()
+                throw IOException("Canceled")
+            }
+            .build()
+        val error = runCatching { cancelling.get(homeworks) }.exceptionOrNull()
+        assertTrue(error is IOException)
+        assertNull(cache.offlineDataTime.value)
+        assertEquals(0L, cache.servedFromCacheCount)
+    }
+
+    @Test
+    fun `ответ из кэша помечен`() {
+        client.get(homeworks)
+        online = false
+        val response = client.newCall(Request.Builder().url(homeworks).build()).execute()
+        response.use {
+            assertTrue(it.isFromOfflineCache())
+        }
+        assertEquals(1L, cache.servedFromCacheCount)
+        online = true
+        client.newCall(Request.Builder().url(homeworks).build()).execute().use {
+            assertTrue(!it.isFromOfflineCache())
+        }
     }
 
     @Test

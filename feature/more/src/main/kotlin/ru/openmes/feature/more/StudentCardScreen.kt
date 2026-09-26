@@ -7,7 +7,10 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.FilterQuality
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
+import kotlinx.coroutines.withContext
 import ru.openmes.core.data.CollegeRepository
 import ru.openmes.core.designsystem.components.MesCard
 import ru.openmes.core.designsystem.components.ScrollableFill
@@ -78,15 +81,23 @@ class StudentCardViewModel(
     private val _state = MutableStateFlow(StudentCardUiState())
     val state = _state.asStateFlow()
 
+    private var loadJob: Job? = null
+
     init {
-        sessionRepository.session
-            .onEach { if (it is Session.LoggedIn) refresh() }
+        // Смена ребёнка: прошлая загрузка отменяется, билет и QR прошлого ребёнка не показываются.
+        sessionRepository.currentChildIdChanges()
+            .onEach { childId ->
+                loadJob?.cancel()
+                _state.value = StudentCardUiState()
+                if (childId != null) refresh()
+            }
             .launchIn(viewModelScope)
     }
 
     fun refresh() {
         val childId = (sessionRepository.session.value as? Session.LoggedIn)?.currentChild?.id ?: return
-        viewModelScope.launch {
+        loadJob?.cancel()
+        loadJob = viewModelScope.launch {
             _state.value = _state.value.copy(loading = true, error = null)
             // Сначала — сохранённые билет и QR (мгновенно и без сети), затем свежие.
             if (_state.value.card == null) {
@@ -113,7 +124,9 @@ class StudentCardViewModel(
     }
 }
 
-private fun ByteArray.decodeBitmap(): ImageBitmap? = BitmapFactory.decodeByteArray(this, 0, size)?.asImageBitmap()
+private suspend fun ByteArray.decodeBitmap(): ImageBitmap? = withContext(Dispatchers.Default) {
+    BitmapFactory.decodeByteArray(this@decodeBitmap, 0, size)?.asImageBitmap()
+}
 
 /** Электронный студенческий билет (family/mobile/v1/student-card). */
 @Composable

@@ -31,7 +31,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.Assignment
-import androidx.compose.material.icons.automirrored.rounded.MenuBook
 import androidx.compose.material.icons.automirrored.rounded.Sort
 import androidx.compose.material.icons.rounded.ArrowDropDown
 import androidx.compose.material.icons.rounded.ArrowDropUp
@@ -60,6 +59,9 @@ import androidx.compose.material3.ToggleButton
 import androidx.compose.material3.ToggleButtonDefaults
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.ui.platform.LocalContext
+import android.widget.Toast
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -77,6 +79,9 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -86,7 +91,11 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import ru.openmes.core.common.pluralRu
 import ru.openmes.core.common.runSuspendCatching
+import ru.openmes.core.common.toFullRu
+import ru.openmes.core.common.toRuDate
+import ru.openmes.core.data.CollegeRepository
 import ru.openmes.core.data.DiaryRepository
 import ru.openmes.core.data.Session
 import ru.openmes.core.data.SessionRepository
@@ -106,6 +115,7 @@ import ru.openmes.core.designsystem.components.StatusPill
 import ru.openmes.core.designsystem.components.groupShape
 import ru.openmes.core.designsystem.components.markShape
 import ru.openmes.core.designsystem.components.markTone
+import ru.openmes.core.model.FinalMarksYear
 import ru.openmes.core.model.GradeBook
 import ru.openmes.core.model.Mark
 import ru.openmes.core.model.MarkDetails
@@ -125,6 +135,7 @@ class MarksViewModel(
     private val sessionRepository: SessionRepository,
     private val diaryRepository: DiaryRepository,
     private val settingsRepository: SettingsRepository,
+    private val collegeRepository: CollegeRepository,
 ) : ViewModel() {
 
     data class MarksUiState(
@@ -134,6 +145,11 @@ class MarksViewModel(
         val byDate: List<SubjectMarks> = emptyList(),
         /** Зачётная книжка. */
         val gradeBook: GradeBook? = null,
+        /** Зачётку загрузить не удалось (а сохранённой нет) — вместо вечной загрузки показываем ошибку. */
+        val gradeBookError: String? = null,
+        /** Годовые оценки по учебным годам (портфолио); null — ещё грузятся. */
+        val finalMarks: List<FinalMarksYear>? = null,
+        val finalMarksError: String? = null,
         val loading: Boolean = true,
         /** Обновление по свайпу (фоновое — после показа кэша — без индикатора). */
         val refreshing: Boolean = false,
@@ -165,17 +181,38 @@ class MarksViewModel(
     private val _state = MutableStateFlow(MarksUiState())
     val state = _state.asStateFlow()
 
+    /** Одноразовые сообщения: не удалось обновить, хотя на экране уже есть данные. */
+    private val _messages = Channel<String>(Channel.BUFFERED)
+    val messages = _messages.receiveAsFlow()
+
+    /** Ребёнок, чьи оценки сейчас в состоянии: сменили ребёнка — всё чужое сбрасываем. */
+    private var loadedChildId: String? = null
+    private var loadJob: Job? = null
+
     init {
+        // Перезагрузка — только при смене ребёнка (или входе), а не на каждое обновление сессии.
         sessionRepository.session
-            .onEach { if (it is Session.LoggedIn) load(userInitiated = false) }
+            .map { (it as? Session.LoggedIn)?.currentChild?.id }
+            .distinctUntilChanged()
+            .onEach { childId -> if (childId != null) load(childId, userInitiated = false) }
             .launchIn(viewModelScope)
     }
 
-    fun refresh() = load(userInitiated = true)
-
-    private fun load(userInitiated: Boolean) {
+    fun refresh() {
         val childId = (sessionRepository.session.value as? Session.LoggedIn)?.currentChild?.id ?: return
-        viewModelScope.launch {
+        load(childId, userInitiated = true)
+    }
+
+    private fun load(childId: String, userInitiated: Boolean) {
+        if (childId != loadedChildId) {
+            loadedChildId = childId
+            closeMarkDetails()
+            closeCalculator()
+            _state.value = MarksUiState()
+        }
+        // Новая загрузка отменяет прежнюю: иначе опоздавший старый ответ затирал бы свежий.
+        loadJob?.cancel()
+        loadJob = viewModelScope.launch {
             _state.value = _state.value.copy(loading = true, refreshing = userInitiated, error = null)
             val today = LocalDate.now()
             // Сначала — сохранённое в офлайн-кэше (мгновенно), затем свежие данные из сети.
@@ -185,10 +222,15 @@ class MarksViewModel(
                 }?.let { (subjects, byDate) ->
                     if (_state.value.subjects.isEmpty()) _state.value = _state.value.copy(subjects = subjects, byDate = byDate)
                 }
-                if (_state.value.gradeBook == null) {
-                    diaryRepository.cachedOnly { getGradeBook(childId) }?.let { gb ->
-                        _state.value = _state.value.copy(gradeBook = gb)
-                    }
+            }
+            if (_state.value.gradeBook == null) {
+                diaryRepository.cachedOnly { getGradeBook(childId) }?.let { gb ->
+                    _state.value = _state.value.copy(gradeBook = gb)
+                }
+            }
+            if (_state.value.finalMarks == null) {
+                collegeRepository.cachedOnly { getFinalMarks(force = true) }?.let { years ->
+                    _state.value = _state.value.copy(finalMarks = years)
                 }
             }
             runSuspendCatching {
@@ -204,12 +246,21 @@ class MarksViewModel(
                 )
             }.onFailure { e ->
                 _state.value = _state.value.copy(loading = false, refreshing = false, error = e.message)
+                // С данными на экране полноэкранной ошибки нет — сообщаем отдельно, чтобы сбой не был тихим.
+                if (_state.value.subjects.isNotEmpty()) {
+                    _messages.send("Не удалось обновить оценки" + (e.message?.let { ": $it" } ?: ""))
+                }
             }
             // Зачётка грузится лениво и не блокирует основной список.
+            _state.value = _state.value.copy(gradeBookError = null)
             runSuspendCatching { diaryRepository.getGradeBook(childId) }
-                .onSuccess { gb ->
-                    _state.value = _state.value.copy(gradeBook = gb)
-                }
+                .onSuccess { gb -> _state.value = _state.value.copy(gradeBook = gb) }
+                .onFailure { e -> _state.value = _state.value.copy(gradeBookError = e.message ?: "Не удалось загрузить зачётку") }
+            // Годовые оценки меняются раз в год: обновляются только по свайпу.
+            _state.value = _state.value.copy(finalMarksError = null)
+            runSuspendCatching { collegeRepository.getFinalMarks(force = userInitiated) }
+                .onSuccess { years -> _state.value = _state.value.copy(finalMarks = years) }
+                .onFailure { e -> _state.value = _state.value.copy(finalMarksError = e.message ?: "Не удалось загрузить годовые оценки") }
         }
     }
 
@@ -260,6 +311,7 @@ private enum class MarksTab(val title: String) {
     ByDate("По дате"),
     BySubject("Предметы"),
     GradeBook("Зачётка"),
+    Annual("Годовые"),
 }
 
 private enum class SubjectSort(val title: String) {
@@ -268,17 +320,16 @@ private enum class SubjectSort(val title: String) {
     Alphabetical("По алфавиту А-Я"),
 }
 
-private val MONTHS_GEN = listOf(
-    "", "января", "февраля", "марта", "апреля", "мая", "июня",
-    "июля", "августа", "сентября", "октября", "ноября", "декабря",
-)
-private val WEEKDAYS = listOf("понедельник", "вторник", "среда", "четверг", "пятница", "суббота", "воскресенье")
-
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MarksScreen(viewModel: MarksViewModel) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     var tab by rememberSaveable { mutableStateOf(MarksTab.ByDate) }
+    val context = LocalContext.current
+
+    LaunchedEffect(viewModel) {
+        viewModel.messages.collect { Toast.makeText(context, it, Toast.LENGTH_LONG).show() }
+    }
 
     // BottomSheet деталей оценки
     viewModel.markDetails?.let { details ->
@@ -336,14 +387,8 @@ fun MarksScreen(viewModel: MarksViewModel) {
                         options = MarksTab.entries,
                         selected = tab,
                         onSelect = { tab = it },
+                        // Без иконок: с ними четыре вкладки не помещаются на узком экране.
                         label = { it.title },
-                        icon = {
-                            when (it) {
-                                MarksTab.ByDate -> Icons.Rounded.DateRange
-                                MarksTab.BySubject -> Icons.AutoMirrored.Rounded.MenuBook
-                                MarksTab.GradeBook -> Icons.Rounded.WorkspacePremium
-                            }
-                        },
                         modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
                     )
                     AnimatedContent(
@@ -358,7 +403,8 @@ fun MarksScreen(viewModel: MarksViewModel) {
                         when (current) {
                             MarksTab.ByDate -> MarksByDate(state, viewModel)
                             MarksTab.BySubject -> MarksBySubject(state, viewModel::openCalculator)
-                            MarksTab.GradeBook -> GradeBookScreen(state)
+                            MarksTab.GradeBook -> GradeBookScreen(state, onRetry = viewModel::refresh)
+                            MarksTab.Annual -> AnnualMarksScreen(state, onRetry = viewModel::refresh)
                         }
                     }
                 }
@@ -379,8 +425,9 @@ private fun MarksByDate(state: MarksViewModel.MarksUiState, viewModel: MarksView
             .flatMap { subject ->
                 subject.marks.map { subject.subjectName to it }
             }
-            .groupBy { it.second.date ?: LocalDate.now() }
-            .toSortedMap(compareByDescending { it })
+            // Оценки без даты — отдельной группой в самом конце, а не под сегодняшним днём.
+            .groupBy { it.second.date }
+            .toSortedMap(nullsLast(compareByDescending { it }))
     }
 
     if (groups.isEmpty()) {
@@ -400,7 +447,7 @@ private fun MarksByDate(state: MarksViewModel.MarksUiState, viewModel: MarksView
         groups.forEach { (date, dayMarks) ->
             item(key = "day_$date") {
                 SectionHeader(
-                    "${date.dayOfMonth} ${MONTHS_GEN[date.monthValue]}, ${WEEKDAYS[date.dayOfWeek.value - 1]}",
+                    date?.let { "${it.toRuDate()}, ${it.dayOfWeek.toFullRu()}" } ?: "Без даты",
                     modifier = Modifier.padding(top = 12.dp, bottom = 6.dp),
                     trailing = {
                         StatusPill(
@@ -625,7 +672,7 @@ private fun SubjectCard(
                     overflow = TextOverflow.Ellipsis,
                 )
                 Text(
-                    "${period.marks.size} ${marksWord(period.marks.size)} · калькулятор",
+                    "${period.marks.size} ${pluralRu(period.marks.size, "оценка", "оценки", "оценок")} · калькулятор",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -655,13 +702,6 @@ private fun SubjectCard(
             }
         }
     }
-}
-
-private fun marksWord(n: Int): String = when {
-    n % 100 in 11..14 -> "оценок"
-    n % 10 == 1 -> "оценка"
-    n % 10 in 2..4 -> "оценки"
-    else -> "оценок"
 }
 
 // ---------------------------------------------------------------------------
@@ -836,9 +876,12 @@ private fun romanNumeral(n: Int): String = when (n) {
 // ---------------------------------------------------------------------------
 
 @Composable
-private fun GradeBookScreen(state: MarksViewModel.MarksUiState) {
+private fun GradeBookScreen(state: MarksViewModel.MarksUiState, onRetry: () -> Unit) {
     val gradeBook = state.gradeBook
     when {
+        gradeBook == null && state.gradeBookError != null -> ScrollableFill {
+            ErrorState(title = "Не удалось загрузить зачётку", onRetry = onRetry, details = state.gradeBookError)
+        }
         gradeBook == null -> LoadingState(label = "Загружаем зачётку…")
         gradeBook.courses.isEmpty() -> EmptyState(
             icon = Icons.Rounded.WorkspacePremium,
@@ -950,6 +993,100 @@ private fun GradeBookCard(subject: GradeBook.Subject, shape: Shape) {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Вкладка «Годовые» (portfolio final-mark): итоговые оценки за каждый учебный год
+// ---------------------------------------------------------------------------
+
+@Composable
+private fun AnnualMarksScreen(state: MarksViewModel.MarksUiState, onRetry: () -> Unit) {
+    val years = state.finalMarks
+    when {
+        years == null && state.finalMarksError != null -> ScrollableFill {
+            ErrorState(title = "Не удалось загрузить годовые оценки", onRetry = onRetry, details = state.finalMarksError)
+        }
+        years == null -> LoadingState(label = "Загружаем годовые оценки…")
+        years.isEmpty() -> ScrollableFill {
+            EmptyState(
+                icon = Icons.Rounded.WorkspacePremium,
+                title = "Годовых оценок нет",
+                subtitle = "Здесь появятся итоговые оценки за учебные годы",
+            )
+        }
+
+        else -> {
+            var selected by rememberSaveable { mutableStateOf(0) }
+            val year = years.getOrElse(selected) { years.first() }
+            Column(Modifier.fillMaxSize()) {
+                if (years.size > 1) {
+                    // Старые годы слева, как на шкале времени.
+                    val ordered = years.indices.reversed().toList()
+                    ConnectedChoiceGroup(
+                        options = ordered,
+                        selected = years.indexOf(year),
+                        onSelect = { selected = it },
+                        label = { years[it].shortTitle() },
+                        fill = years.size <= 5,
+                        modifier = Modifier
+                            .padding(horizontal = 16.dp)
+                            .then(if (years.size > 5) Modifier.horizontalScroll(rememberScrollState()) else Modifier),
+                    )
+                }
+                LazyColumn(
+                    Modifier.weight(1f),
+                    contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 16.dp),
+                    verticalArrangement = Arrangement.spacedBy(GroupGap),
+                ) {
+                    item(key = "annual_header_${year.title}_${year.year}") {
+                        SectionHeader(
+                            listOfNotNull(year.title?.let { "$it учебный год" } ?: year.year?.let { "$it-й год обучения" }, year.level)
+                                .joinToString(" · "),
+                            modifier = Modifier.padding(top = 12.dp, bottom = 6.dp),
+                            trailing = year.average?.let { avg ->
+                                {
+                                    StatusPill(
+                                        "Средний ${"%.2f".format(avg).replace('.', ',')}",
+                                        icon = Icons.Rounded.Star,
+                                        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                                        contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
+                            },
+                        )
+                    }
+                    itemsIndexed(year.marks, key = { i, m -> "annual_${year.title}_${i}_${m.subject}" }) { index, mark ->
+                        MesListItem(
+                            headline = mark.subject,
+                            supporting = mark.gradeSystem?.takeUnless { it == "Пятибалльная" },
+                            shape = groupShape(index, year.marks.size),
+                            trailingContent = {
+                                if (mark.numeric != null) {
+                                    MarkBadge(mark.numeric.toString())
+                                } else {
+                                    val passed = mark.value != "незачёт"
+                                    StatusPill(
+                                        mark.value,
+                                        icon = if (passed) Icons.Rounded.Done else Icons.Rounded.ErrorOutline,
+                                        containerColor = if (passed) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.errorContainer,
+                                        contentColor = if (passed) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onErrorContainer,
+                                    )
+                                }
+                            },
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** «2023-2024» → «23/24». */
+private fun FinalMarksYear.shortTitle(): String =
+    title?.split('-')?.takeIf { it.size == 2 && it.all { p -> p.length == 4 } }
+        ?.joinToString("/") { it.takeLast(2) }
+        ?: title
+        ?: year?.let { "$it год" }
+        ?: "—"
+
 private fun formNameRu(form: String): String = when (form) {
     "EXAM" -> "Экзамены"
     "TEST" -> "Дифференцированные зачёты"
@@ -967,7 +1104,7 @@ private fun MarkDetailsSheet(details: MarkDetails, loading: Boolean) {
         details.controlFormName?.let { Triple(Icons.AutoMirrored.Rounded.Assignment, "Форма контроля", it) },
         details.teacherName?.let { Triple(Icons.Rounded.Person, "Учитель", it) },
         details.date?.let {
-            Triple(Icons.Rounded.DateRange, "Дата", "${it.dayOfMonth} ${MONTHS_GEN[it.monthValue]} ${it.year}")
+            Triple(Icons.Rounded.DateRange, "Дата", it.toRuDate(includeYear = true))
         },
         details.lessonTopic?.let { Triple(Icons.Rounded.Topic, "Тема урока", it) },
     )

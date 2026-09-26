@@ -8,13 +8,11 @@ import androidx.work.NetworkType
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
-import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.withTimeoutOrNull
 import org.koin.core.component.KoinComponent
 import org.koin.core.component.inject
+import ru.openmes.app.notify.currentChildId
+import ru.openmes.core.common.runSuspendCatching
 import ru.openmes.core.data.DiaryRepository
-import ru.openmes.core.data.Session
-import ru.openmes.core.data.SessionRepository
 import java.time.LocalDate
 import java.time.YearMonth
 import java.util.concurrent.TimeUnit
@@ -28,14 +26,10 @@ class CacheRefreshWorker(
     params: WorkerParameters,
 ) : CoroutineWorker(context, params), KoinComponent {
 
-    private val sessionRepository: SessionRepository by inject()
     private val diaryRepository: DiaryRepository by inject()
 
     override suspend fun doWork(): Result {
-        val session = withTimeoutOrNull(30_000) {
-            sessionRepository.session.first { it !is Session.Loading }
-        } as? Session.LoggedIn ?: return Result.success()
-        val childId = session.currentChild?.id ?: return Result.success()
+        val childId = currentChildId() ?: return Result.success()
 
         val today = LocalDate.now()
         val month = YearMonth.from(today)
@@ -54,9 +48,9 @@ class CacheRefreshWorker(
             { diaryRepository.getTestLessons(childId, today, today.plusDays(30)) },
         )
         // Каждый запрос сам по себе: одна упавшая ручка не мешает обновить остальные.
-        val failed = calls.count { call -> runCatching { call() }.isFailure }
+        val failed = calls.count { call -> runSuspendCatching { call() }.isFailure }
         ru.openmes.app.widget.ScheduleWidget.refresh(applicationContext)
-        runCatching { ru.openmes.app.notify.LessonReminders.reschedule(applicationContext) }
+        runSuspendCatching { ru.openmes.app.notify.LessonReminders.reschedule(applicationContext) }
         return if (failed == calls.size) Result.retry() else Result.success()
     }
 

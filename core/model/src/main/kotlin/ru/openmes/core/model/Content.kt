@@ -32,4 +32,18 @@ data class FoodBalance(
     val amount: Double,
     val currency: String = "RUB",
     val contractId: Long? = null,
+    /** Дневной лимит трат, ₽ (null — не задан). */
+    val dayLimit: Double? = null,
+    /** Порог «мало денег на счёте», ₽ (null — не задан). */
+    val lowBalanceThreshold: Double? = null,
+)
+
+/** Операция по счёту питания: покупка или пополнение. */
+data class FoodTransaction(
+    val date: LocalDateTime?,
+    /** ₽; знак — как отдаёт сервер (null — суммы в ответе нет). */
+    val amount: Double?,
+    val title: String?,
+    /** Тип операции как есть (покупка, пополнение, возврат…). */
+    val type: String?,
 )

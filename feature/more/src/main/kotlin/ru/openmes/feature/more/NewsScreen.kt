@@ -42,12 +42,15 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
 import coil3.compose.AsyncImage
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.launch
 import ru.openmes.core.common.runSuspendCatching
+import ru.openmes.core.common.toHM
+import ru.openmes.core.common.toRuDate
 import ru.openmes.core.data.CollegeRepository
 import ru.openmes.core.data.Session
 import ru.openmes.core.data.SessionRepository
@@ -64,8 +67,6 @@ import ru.openmes.core.model.NewsBlock
 import ru.openmes.core.model.NewsItem
 import java.time.LocalDate
 import java.time.LocalDateTime
-import java.time.format.DateTimeFormatter
-import java.util.Locale
 
 class NewsViewModel(
     sessionRepository: SessionRepository,
@@ -92,9 +93,15 @@ class NewsViewModel(
             .launchIn(viewModelScope)
     }
 
+    /** Подгрузка следующей страницы: обновление её отменяет, чтобы старые страницы не легли поверх новой первой. */
+    private var moreJob: Job? = null
+    private var refreshJob: Job? = null
+
     fun refresh(force: Boolean = true) {
-        viewModelScope.launch {
-            _state.value = _state.value.copy(loading = true, error = null)
+        moreJob?.cancel()
+        refreshJob?.cancel()
+        refreshJob = viewModelScope.launch {
+            _state.value = _state.value.copy(loading = true, loadingMore = false, error = null)
             runSuspendCatching { collegeRepository.getNews(1, force) }
                 .onSuccess {
                     _state.value = NewsUiState(items = it.items, page = it.page, pageCount = it.pageCount, loading = false)
@@ -106,13 +113,14 @@ class NewsViewModel(
     fun loadMore() {
         val s = _state.value
         if (s.loading || s.loadingMore || !s.canLoadMore) return
-        viewModelScope.launch {
-            _state.value = s.copy(loadingMore = true)
+        moreJob = viewModelScope.launch {
+            _state.value = _state.value.copy(loadingMore = true)
             runSuspendCatching { collegeRepository.getNews(s.page + 1) }
                 .onSuccess { page ->
-                    val known = s.items.mapTo(HashSet()) { it.id }
-                    _state.value = _state.value.copy(
-                        items = s.items + page.items.filter { it.id !in known },
+                    val current = _state.value
+                    val known = current.items.mapTo(HashSet()) { it.id }
+                    _state.value = current.copy(
+                        items = current.items + page.items.filter { it.id !in known },
                         page = page.page,
                         pageCount = page.pageCount,
                         loadingMore = false,
@@ -264,9 +272,10 @@ fun NewsDetailScreen(viewModel: NewsDetailViewModel) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val item = state.item
     val context = LocalContext.current
-    val linkStyles = TextLinkStyles(
-        SpanStyle(color = MaterialTheme.colorScheme.primary, textDecoration = TextDecoration.Underline),
-    )
+    val linkColor = MaterialTheme.colorScheme.primary
+    val linkStyles = remember(linkColor) {
+        TextLinkStyles(SpanStyle(color = linkColor, textDecoration = TextDecoration.Underline))
+    }
 
     MesPullToRefreshBox(
         isRefreshing = state.loading && item != null,
@@ -307,7 +316,7 @@ fun NewsDetailScreen(viewModel: NewsDetailViewModel) {
                 items(item.blocks) { block ->
                     when (block) {
                         is NewsBlock.Text -> Text(
-                            AnnotatedString.fromHtml(block.html, linkStyles).trimBlank(),
+                            remember(block.html, linkStyles) { AnnotatedString.fromHtml(block.html, linkStyles).trimBlank() },
                             style = MaterialTheme.typography.bodyLarge,
                         )
 
@@ -338,8 +347,7 @@ private fun AnnotatedString.trimBlank(): AnnotatedString {
     return if (end <= start) AnnotatedString("") else subSequence(start, end)
 }
 
-private val NEWS_DATE = DateTimeFormatter.ofPattern("d MMMM, HH:mm", Locale.forLanguageTag("ru"))
-private val NEWS_DATE_YEAR = DateTimeFormatter.ofPattern("d MMMM yyyy", Locale.forLanguageTag("ru"))
-
+/** «12 сентября, 14:30» в текущем году, иначе «12 сентября 2025». */
 private fun LocalDateTime.toNewsDate(): String =
-    if (year == LocalDate.now().year) format(NEWS_DATE) else format(NEWS_DATE_YEAR)
+    if (year == LocalDate.now().year) "${toLocalDate().toRuDate()}, ${toLocalTime().toHM()}"
+    else toLocalDate().toRuDate(includeYear = true)

@@ -3,6 +3,9 @@ package ru.openmes.core.data
 import org.koin.android.ext.koin.androidContext
 import org.koin.core.module.Module
 import org.koin.dsl.module
+import okhttp3.OkHttpClient
+import ru.openmes.core.network.AuthHttpClient
+import ru.openmes.core.network.BaseHttpClient
 import ru.openmes.core.network.CachedMealsApi
 import ru.openmes.core.network.CachedMesApi
 import ru.openmes.core.network.CachedPortalApi
@@ -37,17 +40,27 @@ val dataModule: Module = module {
     }
 
     single<DiaryRepository> {
-        MesDiaryRepository(get(), get(), offlineCache = get(), cached = MesDiaryRepository(get(CachedMesApi), get()))
+        MesDiaryRepository(
+            get(), get(), offlineCache = get(),
+            cached = MesDiaryRepository(get(CachedMesApi), get()),
+            httpClient = get<OkHttpClient>(BaseHttpClient),
+        )
     }
 
     single<FoodRepository> {
-        MealsFoodRepository(get<MealsApi>(), get(), cached = MealsFoodRepository(get(CachedMealsApi), get()))
+        MealsFoodRepository(
+            get<MealsApi>(), get(),
+            cached = MealsFoodRepository(get(CachedMealsApi), get(), memoryCache = false),
+            offlineCache = get(),
+        )
     }
 
     single<CollegeRepository> {
         MesCollegeRepository(
             get<MesApi>(), get<PortalApi>(), get(), offlineCache = get(),
-            cached = MesCollegeRepository(get(CachedMesApi), get(CachedPortalApi), get()),
+            cached = MesCollegeRepository(get(CachedMesApi), get(CachedPortalApi), get(), memoryCache = false),
         )
     }
+
+    single { ApiConsoleRepository(get(AuthHttpClient), get(), get()) }
 }

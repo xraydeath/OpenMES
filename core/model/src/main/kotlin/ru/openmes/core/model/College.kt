@@ -52,3 +52,66 @@ data class ProfEvent(
     val organizer: String? = null,
     val visited: Boolean = false,
 )
+
+/** Портфолио: олимпиады и мероприятия, награды (включая спортивные). */
+data class Portfolio(
+    val events: List<PortfolioEvent> = emptyList(),
+    val rewards: List<PortfolioReward> = emptyList(),
+)
+
+data class PortfolioEvent(
+    val name: String,
+    val date: LocalDate? = null,
+    /** «Школьный этап». */
+    val stage: String? = null,
+    /** «Очное» / «Заочное». */
+    val format: String? = null,
+    val subjects: List<String> = emptyList(),
+    val category: String? = null,
+    /** Набранные баллы (как пришли: "15.0"). */
+    val score: Double? = null,
+    val maxScore: Double? = null,
+    /** Награда за это мероприятие: «Призер», «Победитель»… */
+    val reward: String? = null,
+)
+
+data class PortfolioReward(
+    val name: String,
+    val date: LocalDate? = null,
+    val sport: Boolean = false,
+    /** Откуда: «МЭШ Олимпиады», «ГТО». */
+    val source: String? = null,
+    /** Ступень ГТО и т.п. */
+    val details: String? = null,
+    val number: String? = null,
+    val expireDate: LocalDate? = null,
+)
+
+/** Годовые оценки за учебный год (портфолио). */
+data class FinalMarksYear(
+    /** «2023-2024»; null — сервис не указал. */
+    val title: String?,
+    /** Номер года обучения. */
+    val year: Int? = null,
+    val level: String? = null,
+    val average: Double? = null,
+    val marks: List<FinalMark> = emptyList(),
+)
+
+data class FinalMark(
+    val subject: String,
+    /** «5», «зачёт», «незачёт». */
+    val value: String,
+    /** Числовая оценка, если она есть (для цвета). */
+    val numeric: Int? = null,
+    val gradeSystem: String? = null,
+)
+
+/** Запись ЕМИАС за один день. */
+data class MedicalRecord(
+    val date: LocalDate,
+    /** SICK, SICK_WITH_INFECTION, EXEMPT. */
+    val type: String,
+    /** Освобождение только от части предметов. */
+    val partial: Boolean = false,
+)

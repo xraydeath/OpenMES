@@ -144,6 +144,16 @@ interface MesApi {
         @Query("to") to: String,
     ): AttendanceListResponse
 
+    /**
+     * Справки ЕМИАС: по дню на запись (болеет / инфекция / освобождение), за всё время.
+     * Постранично (page с 1, ~50 записей, страницы слегка перекрываются); даты сервис игнорирует.
+     */
+    @GET("api/ej/core/family/v1/emias_medical_recommendations")
+    suspend fun getMedicalRecommendations(
+        @Query("student_id") studentId: String,
+        @Query("page") page: Int,
+    ): List<MedicalRecommendationDto>
+
     // ---------------------------------------------------------------------
     // Учебные годы (профобразование-префикс po-сборки)
     // ---------------------------------------------------------------------
@@ -832,4 +842,13 @@ data class VisitDto(
     @SerialName("kindName") val kindName: String? = null,
     @SerialName("isIncomplete") val isIncomplete: Boolean = false,
     @SerialName("organizationShortName") val organizationShortName: String? = null,
+)
+
+@Serializable
+data class MedicalRecommendationDto(
+    @SerialName("id") val id: Long = 0,
+    @SerialName("date") val date: String? = null,
+    /** SICK, SICK_WITH_INFECTION, EXEMPT. */
+    @SerialName("type") val type: String? = null,
+    @SerialName("subject_ids") val subjectIds: List<Long> = emptyList(),
 )

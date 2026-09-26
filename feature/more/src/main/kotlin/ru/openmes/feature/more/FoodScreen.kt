@@ -1,5 +1,11 @@
 package ru.openmes.feature.more
 
+import ru.openmes.core.model.FoodTransaction
+import androidx.compose.ui.platform.LocalUriHandler
+import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material.icons.automirrored.rounded.ReceiptLong
+import androidx.compose.material.icons.automirrored.rounded.OpenInNew
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -36,6 +42,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.launchIn
@@ -43,6 +50,7 @@ import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.launch
 import ru.openmes.core.common.humanize
 import ru.openmes.core.common.runSuspendCatching
+import ru.openmes.core.common.toHM
 import ru.openmes.core.common.toRuDate
 import ru.openmes.core.common.toShortRu
 import ru.openmes.core.data.FoodRepository
@@ -67,7 +75,6 @@ import ru.openmes.core.model.FoodComplex
 import ru.openmes.core.model.FoodDay
 import java.time.DayOfWeek
 import java.time.LocalDate
-import java.time.format.DateTimeFormatter
 import java.util.Locale
 import kotlin.math.roundToInt
 
@@ -83,6 +90,9 @@ class FoodViewModel(
         val balance: FoodBalance? = null,
         /** Организация питания (оператор). */
         val provider: String? = null,
+        /** Операции по счёту за [TRANSACTIONS_DAYS] дней; null — ещё не загружены. */
+        val transactions: List<FoodTransaction>? = null,
+        val transactionsFailed: Boolean = false,
         val loading: Boolean = true,
         val error: String? = null,
     )
@@ -90,14 +100,24 @@ class FoodViewModel(
     private val _state = MutableStateFlow(FoodUiState())
     val state = _state.asStateFlow()
 
-    /** Уже загруженные недели (по понедельнику) — возврат к ним без загрузки. */
-    private val weeks = mutableMapOf<LocalDate, Map<LocalDate, FoodDay>>()
+    /** Уже загруженные недели (по ребёнку и понедельнику) — возврат к ним без загрузки. */
+    private val weeks = mutableMapOf<Pair<String, LocalDate>, Map<LocalDate, FoodDay>>()
+
+    private var loadJob: Job? = null
 
     init {
-        sessionRepository.session
-            .onEach { if (it is Session.LoggedIn) load(force = false) }
+        // Меню и баланс зависят от ребёнка: при смене всё прошлое сбрасывается.
+        sessionRepository.currentChildIdChanges()
+            .onEach { childId ->
+                loadJob?.cancel()
+                weeks.clear()
+                _state.value = FoodUiState()
+                if (childId != null) load(force = false)
+            }
             .launchIn(viewModelScope)
     }
+
+    private fun childId() = (sessionRepository.session.value as? Session.LoggedIn)?.currentChild?.id
 
     fun select(date: LocalDate) {
         _state.value = _state.value.copy(selected = date)
@@ -106,7 +126,7 @@ class FoodViewModel(
     fun shiftWeek(weeks: Long) {
         val s = _state.value
         val monday = s.monday.plusWeeks(weeks)
-        val cached = this.weeks[monday]
+        val cached = childId()?.let { this.weeks[it to monday] }
         _state.value = s.copy(
             monday = monday,
             selected = s.selected.plusWeeks(weeks),
@@ -121,7 +141,9 @@ class FoodViewModel(
     fun refresh() = load(force = true)
 
     private fun load(force: Boolean) {
-        viewModelScope.launch {
+        val childId = childId() ?: return
+        loadJob?.cancel()
+        loadJob = viewModelScope.launch {
             val monday = _state.value.monday
             val sunday = monday.plusDays(6)
             _state.value = _state.value.copy(loading = true, error = null)
@@ -130,6 +152,14 @@ class FoodViewModel(
             launch {
                 runSuspendCatching { foodRepository.getBalance() }.getOrNull()
                     ?.let { _state.value = _state.value.copy(balance = it) }
+            }
+            if (force || _state.value.transactions == null) {
+                launch {
+                    val today = LocalDate.now()
+                    runSuspendCatching { foodRepository.getTransactions(today.minusDays(TRANSACTIONS_DAYS - 1), today) }
+                        .onSuccess { _state.value = _state.value.copy(transactions = it, transactionsFailed = false) }
+                        .onFailure { _state.value = _state.value.copy(transactionsFailed = true) }
+                }
             }
             if (_state.value.provider == null) {
                 launch {
@@ -155,10 +185,10 @@ class FoodViewModel(
             runSuspendCatching { foodRepository.getMenu(monday, sunday, force) }
                 .onSuccess { days ->
                     val byDate = days.associateBy { it.date }
-                    weeks[monday] = byDate
+                    weeks[childId to monday] = byDate
                     if (_state.value.monday != monday) return@onSuccess
                     _state.value = _state.value.copy(days = byDate, loading = false)
-                    prefetchWeek(monday.plusWeeks(1))
+                    prefetchWeek(childId, monday.plusWeeks(1))
                 }
                 .onFailure { e ->
                     if (_state.value.monday == monday) {
@@ -169,11 +199,12 @@ class FoodViewModel(
     }
 
     /** Следующая неделя — заранее, чтобы листание было без ожидания. */
-    private fun prefetchWeek(monday: LocalDate) {
-        if (monday in weeks) return
+    private fun prefetchWeek(childId: String, monday: LocalDate) {
+        if ((childId to monday) in weeks) return
         viewModelScope.launch {
             runSuspendCatching { foodRepository.getMenu(monday, monday.plusDays(6)) }
-                .onSuccess { days -> weeks[monday] = days.associateBy { it.date } }
+                // Ребёнка успели сменить — меню относится к прошлому, в кэш не кладём.
+                .onSuccess { days -> if (childId() == childId) weeks[childId to monday] = days.associateBy { it.date } }
         }
     }
 }
@@ -181,14 +212,21 @@ class FoodViewModel(
 private enum class FoodTab(val title: String) {
     Canteen("Столовая"),
     Buffet("Буфет"),
+    Account("Счёт"),
 }
 
-/** Питание: меню комплексов столовой и буфета по дням недели, баланс счёта. */
+private const val TRANSACTIONS_DAYS = 30L
+
+/** Пополнение счёта питания. */
+private const val TOP_UP_URL = "https://newpay.mos.ru/"
+
+/** Питание: меню комплексов столовой и буфета по дням недели, лицевой счёт и операции. */
 @Composable
 fun FoodScreen(viewModel: FoodViewModel) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     var tab by rememberSaveable { mutableStateOf(FoodTab.Canteen) }
     val day = state.days[state.selected]
+    val uriHandler = LocalUriHandler.current
 
     Column(Modifier.fillMaxSize()) {
         FoodWeekBar(
@@ -225,6 +263,12 @@ fun FoodScreen(viewModel: FoodViewModel) {
                     when (tab) {
                         FoodTab.Canteen -> canteen(day)
                         FoodTab.Buffet -> buffet(day?.buffet)
+                        FoodTab.Account -> account(
+                            balance = state.balance,
+                            transactions = state.transactions,
+                            failed = state.transactionsFailed,
+                            onTopUp = { runCatching { uriHandler.openUri(TOP_UP_URL) } },
+                        )
                     }
                 }
             }
@@ -269,6 +313,85 @@ private fun LazyListScope.buffet(buffet: Buffet?) {
         item(key = "b_$category") { SectionHeader(category, Modifier.padding(top = 12.dp)) }
         itemsIndexed(dishes, key = { i, d -> "b_${d.id}_$i" }) { index, dish ->
             DishItem(dish, shape = groupShape(index, dishes.size), showPrice = true)
+        }
+    }
+}
+
+private fun LazyListScope.account(
+    balance: FoodBalance?,
+    transactions: List<FoodTransaction>?,
+    failed: Boolean,
+    onTopUp: () -> Unit,
+) {
+    val rows = listOfNotNull(
+        balance?.contractId?.let { "Лицевой счёт" to "№ $it" },
+        "Дневной лимит трат" to (balance?.dayLimit?.let(::formatRub) ?: "не задан"),
+        "Предупреждать при остатке ниже" to (balance?.lowBalanceThreshold?.let(::formatRub) ?: "не задано"),
+    )
+    item { SectionHeader("Лицевой счёт", Modifier.padding(top = 12.dp)) }
+    itemsIndexed(rows, key = { _, r -> "acc_${r.first}" }) { index, (title, value) ->
+        MesCard(shape = groupShape(index, rows.size), contentPadding = PaddingValues(horizontal = 16.dp, vertical = 14.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(title, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
+                Text(value, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary)
+            }
+        }
+    }
+    item {
+        FilledTonalButton(
+            onClick = onTopUp,
+            shapes = ButtonDefaults.shapes(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = 8.dp),
+        ) {
+            Icon(Icons.AutoMirrored.Rounded.OpenInNew, contentDescription = null)
+            Text("Пополнить на newpay.mos.ru", Modifier.padding(start = 8.dp))
+        }
+    }
+
+    item { SectionHeader("Операции за $TRANSACTIONS_DAYS дней", Modifier.padding(top = 12.dp)) }
+    when {
+        transactions.isNullOrEmpty() -> item {
+            EmptyState(
+                icon = Icons.AutoMirrored.Rounded.ReceiptLong,
+                title = when {
+                    transactions != null -> "Покупок пока не было"
+                    failed -> "Не удалось загрузить операции"
+                    else -> "Загружаем операции…"
+                },
+                subtitle = if (transactions != null) "Операций по счёту за этот период нет" else null,
+                modifier = Modifier.padding(top = 16.dp),
+            )
+        }
+        else -> itemsIndexed(transactions, key = { i, _ -> "tx_$i" }) { index, tx ->
+            TransactionItem(tx, groupShape(index, transactions.size))
+        }
+    }
+}
+
+@Composable
+private fun TransactionItem(tx: FoodTransaction, shape: Shape) {
+    MesCard(shape = shape, contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text(tx.title ?: tx.type ?: "Операция", style = MaterialTheme.typography.titleMedium)
+                val meta = listOfNotNull(
+                    tx.date?.let { "${it.toLocalDate().humanize()}, ${it.toLocalTime().toHM()}" },
+                    tx.type?.takeIf { tx.title != null },
+                ).joinToString(" · ")
+                if (meta.isNotEmpty()) {
+                    Text(meta, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+            tx.amount?.let {
+                Text(
+                    formatRub(it),
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.padding(start = 12.dp),
+                )
+            }
         }
     }
 }
@@ -454,10 +577,8 @@ private fun FoodWeekBar(
     }
 }
 
-private val hoursFormat = DateTimeFormatter.ofPattern("HH:mm")
-
 private fun Buffet.hoursText(): String? =
-    if (openAt != null && closeAt != null) "${openAt!!.format(hoursFormat)}–${closeAt!!.format(hoursFormat)}" else null
+    if (openAt != null && closeAt != null) "${openAt!!.toHM()}–${closeAt!!.toHM()}" else null
 
 private fun Dish.nutrition(): String? {
     val parts = listOfNotNull(

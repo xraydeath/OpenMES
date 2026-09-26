@@ -1,8 +1,10 @@
 package ru.openmes.feature.more
 
 import android.Manifest
+import android.app.Activity
 import android.app.AlarmManager
 import android.content.Context
+import android.content.ContextWrapper
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
@@ -33,6 +35,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Shape
@@ -100,18 +103,63 @@ fun NotificationSettingsScreen(
     }
 
     // Android 13+: без разрешения уведомления молча не показываются. Включение ждёт ответа на запрос.
-    var pending by remember { mutableStateOf<(() -> Unit)?>(null) }
+    // Что включить после ответа — ключом, чтобы пережить поворот, пока открыт системный диалог.
+    var pending by rememberSaveable { mutableStateOf<PendingEnable?>(null) }
+    var rationaleBefore by rememberSaveable { mutableStateOf(false) }
+    // Отказ показывает плашку «Уведомления запрещены», даже если ничего ещё не включено.
+    var denied by rememberSaveable { mutableStateOf(false) }
+    fun apply(target: PendingEnable) = when (target) {
+        PendingEnable.Marks -> viewModel.setMarks(true)
+        PendingEnable.Lessons -> viewModel.setLessons(true)
+        PendingEnable.Homework -> viewModel.setHomework(true)
+        PendingEnable.Tests -> viewModel.setTests(true)
+        PendingEnable.ScheduleChanges -> viewModel.setScheduleChanges(true)
+        PendingEnable.PreviewLesson -> onPreviewLesson()
+        PendingEnable.CheckEvening -> {
+            onCheckEvening()
+            Toast.makeText(context, "Проверяем ДЗ и контрольные на завтра…", Toast.LENGTH_SHORT).show()
+        }
+    }
     val permission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         permitted = granted
-        if (granted) pending?.invoke()
+        val target = pending
         pending = null
-    }
-    fun toggle(enabled: Boolean, apply: (Boolean) -> Unit) {
-        if (enabled && !context.notificationsPermitted() && Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            pending = { apply(true) }
-            permission.launch(Manifest.permission.POST_NOTIFICATIONS)
+        if (granted) {
+            denied = false
+            target?.let(::apply)
         } else {
-            apply(enabled)
+            denied = true
+            // Ни до, ни после запроса не нужно объяснение — система больше не показывает диалог
+            // («Больше не спрашивать»): разрешить можно только в настройках.
+            val rationaleAfter = context.findActivity()
+                ?.shouldShowRequestPermissionRationale(Manifest.permission.POST_NOTIFICATIONS) == true
+            if (!rationaleBefore && !rationaleAfter) {
+                Toast.makeText(context, "Разрешите уведомления для OpenMES в настройках", Toast.LENGTH_LONG).show()
+                context.openAppNotificationSettings()
+            }
+        }
+    }
+    fun toggle(enabled: Boolean, target: PendingEnable) {
+        if (enabled && !context.notificationsPermitted()) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+                ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+            ) {
+                pending = target
+                rationaleBefore = context.findActivity()
+                    ?.shouldShowRequestPermissionRationale(Manifest.permission.POST_NOTIFICATIONS) == true
+                permission.launch(Manifest.permission.POST_NOTIFICATIONS)
+                return
+            }
+            // Разрешение есть, но уведомления выключены в системе — включаем и показываем плашку.
+            denied = true
+        }
+        if (enabled) apply(target) else when (target) {
+            PendingEnable.Marks -> viewModel.setMarks(false)
+            PendingEnable.Lessons -> viewModel.setLessons(false)
+            PendingEnable.Homework -> viewModel.setHomework(false)
+            PendingEnable.Tests -> viewModel.setTests(false)
+            PendingEnable.ScheduleChanges -> viewModel.setScheduleChanges(false)
+            PendingEnable.PreviewLesson, PendingEnable.CheckEvening -> Unit
         }
     }
 
@@ -125,7 +173,7 @@ fun NotificationSettingsScreen(
                 title = "Изменения в расписании",
                 subtitle = "Отмена, замена и перенос пар, новые пары; проверка примерно раз в 30 минут",
                 checked = settings.scheduleChangeNotifications,
-                onCheckedChange = { toggle(it, viewModel::setScheduleChanges) },
+                onCheckedChange = { toggle(it, PendingEnable.ScheduleChanges) },
                 shape = shape,
             )
         }
@@ -169,7 +217,7 @@ fun NotificationSettingsScreen(
                 title = "Новые оценки",
                 subtitle = "Проверять дневник в фоне примерно раз в час",
                 checked = settings.marksNotifications,
-                onCheckedChange = { toggle(it, viewModel::setMarks) },
+                onCheckedChange = { toggle(it, PendingEnable.Marks) },
                 shape = shape,
             )
         },
@@ -193,7 +241,7 @@ fun NotificationSettingsScreen(
                 title = "Перед парой",
                 subtitle = "Предмет, время и кабинет; у дистанционной — кнопка «Подключиться»",
                 checked = settings.lessonReminders,
-                onCheckedChange = { toggle(it, viewModel::setLessons) },
+                onCheckedChange = { toggle(it, PendingEnable.Lessons) },
                 shape = shape,
             )
         }
@@ -238,7 +286,7 @@ fun NotificationSettingsScreen(
                     headline = "Показать пример",
                     supporting = "Как будет выглядеть напоминание",
                     icon = Icons.Rounded.NotificationsActive,
-                    onClick = { toggle(true) { onPreviewLesson() } },
+                    onClick = { toggle(true, PendingEnable.PreviewLesson) },
                     shape = shape,
                 )
             }
@@ -252,7 +300,7 @@ fun NotificationSettingsScreen(
                 title = "Несделанное ДЗ на завтра",
                 subtitle = "Список заданий, не отмеченных выполненными",
                 checked = settings.homeworkReminders,
-                onCheckedChange = { toggle(it, viewModel::setHomework) },
+                onCheckedChange = { toggle(it, PendingEnable.Homework) },
                 shape = shape,
             )
         }
@@ -262,7 +310,7 @@ fun NotificationSettingsScreen(
                 title = "Контрольные завтра",
                 subtitle = "Контрольные, зачёты и проверочные по расписанию",
                 checked = settings.testReminders,
-                onCheckedChange = { toggle(it, viewModel::setTests) },
+                onCheckedChange = { toggle(it, PendingEnable.Tests) },
                 shape = shape,
             )
         }
@@ -284,12 +332,7 @@ fun NotificationSettingsScreen(
                     headline = "Проверить сейчас",
                     supporting = "Уведомление придёт, если на завтра что-то есть",
                     icon = Icons.Rounded.NotificationsActive,
-                    onClick = {
-                        toggle(true) {
-                            onCheckEvening()
-                            Toast.makeText(context, "Проверяем ДЗ и контрольные на завтра…", Toast.LENGTH_SHORT).show()
-                        }
-                    },
+                    onClick = { toggle(true, PendingEnable.CheckEvening) },
                     shape = shape,
                 )
             }
@@ -301,7 +344,7 @@ fun NotificationSettingsScreen(
         contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 24.dp),
         verticalArrangement = Arrangement.spacedBy(GroupGap),
     ) {
-        if (anyEnabled && !permitted) {
+        if ((anyEnabled || denied) && !permitted) {
             item {
                 MesListItem(
                     headline = "Уведомления запрещены",
@@ -338,6 +381,15 @@ fun NotificationSettingsScreen(
             )
         }
     }
+}
+
+/** Что включить, когда пользователь ответит на запрос разрешения. */
+private enum class PendingEnable { Marks, Lessons, Homework, Tests, ScheduleChanges, PreviewLesson, CheckEvening }
+
+private tailrec fun Context.findActivity(): Activity? = when (this) {
+    is Activity -> this
+    is ContextWrapper -> baseContext.findActivity()
+    else -> null
 }
 
 private fun Context.notificationsPermitted(): Boolean =

@@ -54,17 +54,16 @@ class ScheduleChangesWorker(
 
         val prefs = applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         val key = "$KEY_PREFIX$childId"
-        val stored = prefs.getString(key, null)
+        val previous = prefs.getString(key, null)?.lineSequence()?.mapNotNull(SlotSnapshot::decode)?.toList()
+        val diff = previous?.let {
+            diffWindow(it, current, today, until, settings.scheduleChangesRooms, settings.scheduleChangesRooms)
+        }
+        // Пустой ответ при непустом прошлом снимке — снимок не трогаем и молчим.
+        if (previous != null && diff == null) return Result.success()
         prefs.edit { putString(key, current.joinToString("\n") { it.encode() }) }
-        if (stored == null) return Result.success()
+        if (diff == null) return Result.success()
 
-        // Сравниваем только дни, которые были в прошлом снимке: новый день на краю окна — не «новые пары».
-        val previous = stored.lineSequence().mapNotNull(SlotSnapshot::decode).toList()
-        val lastDay = previous.maxOfOrNull { it.date } ?: return Result.success()
-        val comparable = current.filter { !it.date.isAfter(lastDay) }
-        val old = previous.filter { !it.date.isBefore(today) }
-
-        val changes = diffSchedules(old, comparable, settings.scheduleChangesRooms, settings.scheduleChangesRooms)
+        val changes = diff
             // Прошедшие пары сегодня не интересны.
             .filter { c -> c.date != today || c.start == null || c.start.isAfter(now.toLocalTime()) }
         if (changes.isEmpty()) return Result.success()
@@ -79,7 +78,7 @@ class ScheduleChangesWorker(
             Notifications.post(applicationContext, ID_BASE + date.dayOfYear, builder)
         }
         // Напоминания о парах — по новому расписанию.
-        runCatching { LessonReminders.reschedule(applicationContext) }
+        runSuspendCatching { LessonReminders.reschedule(applicationContext) }
         return Result.success()
     }
 

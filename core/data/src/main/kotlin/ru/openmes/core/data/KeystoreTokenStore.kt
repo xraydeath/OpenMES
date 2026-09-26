@@ -22,16 +22,36 @@ interface TokenStore {
     fun save(tokens: AuthTokens)
     fun load(): AuthTokens?
     fun clear()
+
+    /**
+     * Атомарное чтение-изменение-запись: [transform] получает текущие токены (null — их нет)
+     * и возвращает новые; null или тот же объект — ничего не записывать.
+     * @return токены в хранилище после операции.
+     */
+    fun update(transform: (AuthTokens?) -> AuthTokens?): AuthTokens?
 }
 
 class KeystoreTokenStore(context: Context) : TokenStore {
 
     private val json = Json { ignoreUnknownKeys = true }
     private val file: File = File(context.filesDir, "openmes_tokens.bin")
+    private val lock = Any()
 
+    /** Расшифрованные токены в памяти: сетевой слой читает их на каждый запрос. */
+    @Volatile
+    private var cached: AuthTokens? = null
+
+    @Volatile
+    private var cacheLoaded = false
+
+    @Volatile
+    private var key: SecretKey? = null
+
+    @Synchronized
     private fun masterKey(): SecretKey {
+        key?.let { return it }
         val keyStore = KeyStore.getInstance(ANDROID_KEYSTORE).apply { load(null) }
-        (keyStore.getKey(KEY_ALIAS, null) as? SecretKey)?.let { return it }
+        (keyStore.getKey(KEY_ALIAS, null) as? SecretKey)?.let { return it.also { key = it } }
 
         val generator = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, ANDROID_KEYSTORE)
         generator.init(
@@ -44,10 +64,40 @@ class KeystoreTokenStore(context: Context) : TokenStore {
                 .setKeySize(KEY_SIZE)
                 .build(),
         )
-        return generator.generateKey()
+        return generator.generateKey().also { key = it }
     }
 
-    override fun save(tokens: AuthTokens) {
+    override fun save(tokens: AuthTokens) = synchronized(lock) {
+        write(tokens)
+        cached = tokens
+        cacheLoaded = true
+    }
+
+    override fun load(): AuthTokens? {
+        if (cacheLoaded) return cached
+        return synchronized(lock) {
+            if (!cacheLoaded) {
+                cached = read()
+                cacheLoaded = true
+            }
+            cached
+        }
+    }
+
+    override fun clear() = synchronized(lock) {
+        file.delete()
+        cached = null
+        cacheLoaded = true
+    }
+
+    override fun update(transform: (AuthTokens?) -> AuthTokens?): AuthTokens? = synchronized(lock) {
+        val current = load()
+        val updated = transform(current)
+        if (updated != null && updated !== current) save(updated)
+        load()
+    }
+
+    private fun write(tokens: AuthTokens) {
         val cipher = Cipher.getInstance(TRANSFORMATION).apply { init(Cipher.ENCRYPT_MODE, masterKey()) }
         val iv = cipher.iv
         val encrypted = cipher.doFinal(json.encodeToString(tokens).toByteArray(Charsets.UTF_8))
@@ -64,7 +114,7 @@ class KeystoreTokenStore(context: Context) : TokenStore {
         }
     }
 
-    override fun load(): AuthTokens? {
+    private fun read(): AuthTokens? {
         if (!file.exists()) return null
         return runCatching {
             val bytes = file.readBytes()
@@ -76,10 +126,6 @@ class KeystoreTokenStore(context: Context) : TokenStore {
             }
             json.decodeFromString<AuthTokens>(String(cipher.doFinal(payload), Charsets.UTF_8))
         }.getOrNull()
-    }
-
-    override fun clear() {
-        file.delete()
     }
 
     private companion object {

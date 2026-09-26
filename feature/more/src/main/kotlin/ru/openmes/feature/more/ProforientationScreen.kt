@@ -30,6 +30,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.launchIn
@@ -38,7 +39,6 @@ import kotlinx.coroutines.launch
 import ru.openmes.core.common.runSuspendCatching
 import ru.openmes.core.common.toRuDate
 import ru.openmes.core.data.CollegeRepository
-import ru.openmes.core.data.Session
 import ru.openmes.core.data.SessionRepository
 import ru.openmes.core.designsystem.components.EmptyState
 import ru.openmes.core.designsystem.components.ErrorState
@@ -71,14 +71,22 @@ class ProforientationViewModel(
     private val _state = MutableStateFlow(ProforientationUiState())
     val state = _state.asStateFlow()
 
+    private var loadJob: Job? = null
+
     init {
-        sessionRepository.session
-            .onEach { if (it is Session.LoggedIn) refresh(force = false) }
+        // Смена ребёнка: прошлая загрузка отменяется, чужие данные профориентации не показываются.
+        sessionRepository.currentChildIdChanges()
+            .onEach { childId ->
+                loadJob?.cancel()
+                _state.value = ProforientationUiState()
+                if (childId != null) refresh(force = false)
+            }
             .launchIn(viewModelScope)
     }
 
     fun refresh(force: Boolean = true) {
-        viewModelScope.launch {
+        loadJob?.cancel()
+        loadJob = viewModelScope.launch {
             _state.value = _state.value.copy(loading = true, error = null)
             // Сначала — сохранённое (мгновенно), затем свежее из сети.
             if (_state.value.data == null) {

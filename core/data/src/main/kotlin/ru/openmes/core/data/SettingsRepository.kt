@@ -1,8 +1,6 @@
 package ru.openmes.core.data
 
 import android.content.Context
-import java.security.MessageDigest
-import java.security.SecureRandom
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
@@ -12,9 +10,11 @@ import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.core.stringSetPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.withContext
 import ru.openmes.core.model.RoundingRules
 import ru.openmes.core.network.interceptor.CachePolicy
 import ru.openmes.core.network.interceptor.CacheSection
@@ -90,7 +90,7 @@ interface SettingsRepository {
     suspend fun setScheduleChangesDays(days: Int)
     suspend fun setScheduleChangesRooms(enabled: Boolean)
 
-    /** Установить PIN (null — снять блокировку). Хранится только солёный SHA-256. */
+    /** Установить PIN (null — снять блокировку). Хранится только солёный PBKDF2-хэш. */
     suspend fun setPin(pin: String?)
     suspend fun checkPin(pin: String): Boolean
     suspend fun setBiometricEnabled(enabled: Boolean)
@@ -237,16 +237,19 @@ class DataStoreSettingsRepository(
     }
 
     override suspend fun setPin(pin: String?) {
-        context.settingsDataStore.edit { prefs ->
-            if (pin == null) {
+        if (pin == null) {
+            context.settingsDataStore.edit { prefs ->
                 prefs.remove(Keys.PIN_HASH)
                 prefs.remove(Keys.PIN_SALT)
                 prefs.remove(Keys.BIOMETRIC)
-            } else {
-                val salt = ByteArray(16).also { SecureRandom().nextBytes(it) }.toHex()
-                prefs[Keys.PIN_SALT] = salt
-                prefs[Keys.PIN_HASH] = hashPin(pin, salt)
             }
+            return
+        }
+        val salt = PinHasher.newSalt()
+        val hash = withContext(Dispatchers.Default) { PinHasher.hash(pin, salt) }
+        context.settingsDataStore.edit { prefs ->
+            prefs[Keys.PIN_SALT] = salt
+            prefs[Keys.PIN_HASH] = hash
         }
     }
 
@@ -254,7 +257,20 @@ class DataStoreSettingsRepository(
         val prefs = context.settingsDataStore.data.first()
         val hash = prefs[Keys.PIN_HASH] ?: return true
         val salt = prefs[Keys.PIN_SALT].orEmpty()
-        return MessageDigest.isEqual(hash.toByteArray(), hashPin(pin, salt).toByteArray())
+        val ok = withContext(Dispatchers.Default) { PinHasher.verify(pin, salt, hash) }
+        if (ok && PinHasher.needsRehash(hash)) {
+            // Старый хэш (один SHA-256) — прозрачно переводим на PBKDF2, раз PIN известен.
+            val newSalt = PinHasher.newSalt()
+            val newHash = withContext(Dispatchers.Default) { PinHasher.hash(pin, newSalt) }
+            context.settingsDataStore.edit { p ->
+                // PIN могли сменить или снять, пока считали.
+                if (p[Keys.PIN_HASH] == hash) {
+                    p[Keys.PIN_SALT] = newSalt
+                    p[Keys.PIN_HASH] = newHash
+                }
+            }
+        }
+        return ok
     }
 
     override suspend fun setBiometricEnabled(enabled: Boolean) {
@@ -291,8 +307,4 @@ class DataStoreSettingsRepository(
         }
     }
 
-    private fun hashPin(pin: String, salt: String): String =
-        MessageDigest.getInstance("SHA-256").digest((salt + pin).toByteArray()).toHex()
-
-    private fun ByteArray.toHex(): String = joinToString("") { "%02x".format(it) }
 }

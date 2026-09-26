@@ -5,14 +5,7 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import androidx.browser.customtabs.CustomTabsIntent
-import androidx.compose.animation.core.LinearEasing
-import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
-import androidx.compose.animation.core.tween
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -44,7 +37,6 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -52,8 +44,13 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.launchIn
+import kotlinx.coroutines.flow.onEach
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import ru.openmes.core.common.runSuspendCatching
 import ru.openmes.core.data.Session
@@ -83,8 +80,21 @@ class LoginViewModel(
 
     val session: StateFlow<Session> = sessionRepository.session
 
+    /** Ошибка прошлой попытки скрыта, пока идёт новая; новое состояние сессии показывает её снова. */
+    private val authErrorHidden = MutableStateFlow(false)
+
+    /** Причина последней неудачной авторизации (например, «state mismatch»). */
+    val authError: StateFlow<String?> = combine(session, authErrorHidden) { s, hidden ->
+        (s as? Session.LoggedOut)?.error?.takeUnless { hidden }
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, (session.value as? Session.LoggedOut)?.error)
+
+    init {
+        session.onEach { authErrorHidden.value = false }.launchIn(viewModelScope)
+    }
+
     fun startLogin() {
         if (_state.value.preparing) return
+        authErrorHidden.value = true
         viewModelScope.launch {
             _state.value = State(preparing = true)
             runSuspendCatching {
@@ -102,6 +112,11 @@ class LoginViewModel(
         if (_state.value.launchUrl != null) _state.value = State()
     }
 
+    /** Ссылку нечем открыть. */
+    fun onBrowserMissing() {
+        _state.value = State(error = "Нет браузера, чтобы открыть страницу входа mos.ru. Установите браузер и попробуйте снова")
+    }
+
     fun consumeError() {
         if (_state.value.error != null) _state.value = State()
     }
@@ -116,18 +131,16 @@ fun LoginScreen(
     onOpenSource: () -> Unit,
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
-    val session by viewModel.session.collectAsStateWithLifecycle()
+    val authError by viewModel.authError.collectAsStateWithLifecycle()
     val context = LocalContext.current
 
     // Готова ссылка — открываем браузер один раз.
     LaunchedEffect(state.launchUrl) {
         val url = state.launchUrl ?: return@LaunchedEffect
-        openInBrowser(context, url)
-        viewModel.consumeLaunch()
+        if (openInBrowser(context, url)) viewModel.consumeLaunch() else viewModel.onBrowserMissing()
     }
 
-    val authError = (session as? Session.LoggedOut)?.error
-    val errorText = state.error ?: authError
+    val errorText = state.error ?: authError?.takeUnless { state.preparing }
 
     Column(
         modifier = Modifier
@@ -138,35 +151,12 @@ fun LoginScreen(
     ) {
         Spacer(Modifier.height(64.dp))
 
-        // Брендовый expressive-логотип: медленно вращающееся «печенье».
-        val rotation by rememberInfiniteTransition(label = "logo").animateFloat(
-            initialValue = 0f,
-            targetValue = 360f,
-            animationSpec = infiniteRepeatable(tween(durationMillis = 24_000, easing = LinearEasing)),
-            label = "logo_rotation",
-        )
-        val logoShape = MaterialShapes.Cookie12Sided.toShape()
-        Box(Modifier.size(128.dp), contentAlignment = Alignment.Center) {
-            Box(
-                Modifier
-                    .matchParentSize()
-                    .graphicsLayer { rotationZ = rotation }
-                    .background(MaterialTheme.colorScheme.primaryContainer, logoShape),
-            )
-            Text(
-                text = "ОМ",
-                style = MaterialTheme.typography.displaySmallEmphasized,
-                color = MaterialTheme.colorScheme.onPrimaryContainer,
-            )
-        }
-
-        Spacer(Modifier.height(24.dp))
         Text(
-            text = "Колледж МЭШ",
+            text = "OpenMES",
             style = MaterialTheme.typography.headlineLargeEmphasized,
         )
         Text(
-            text = "Открытый клиент дневника",
+            text = "Открытый клиент «Колледжа МЭШ»",
             style = MaterialTheme.typography.bodyLarge,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -260,26 +250,25 @@ fun LoginScreen(
     }
 }
 
-/** Custom Tabs с фолбэком на обычный браузер. */
-private fun openInBrowser(context: Context, url: String) {
+/** Custom Tabs с фолбэком на обычный браузер. @return false, если открыть нечем. */
+private fun openInBrowser(context: Context, url: String): Boolean {
     val uri = Uri.parse(url)
     try {
         CustomTabsIntent.Builder()
             .setShowTitle(true)
             .build()
             .launchUrl(context, uri)
-    } catch (_: ActivityNotFoundException) {
-        // Нет Custom Tabs-провайдера — обычный браузер.
-        try {
-            context.startActivity(Intent(Intent.ACTION_VIEW, uri))
-        } catch (_: Exception) {
-            // Совсем нет браузера — редкий случай.
-        }
+        return true
     } catch (_: Exception) {
-        try {
-            context.startActivity(Intent(Intent.ACTION_VIEW, uri))
-        } catch (_: Exception) {
-        }
+        // Нет Custom Tabs-провайдера (или он упал) — обычный браузер.
+    }
+    return try {
+        context.startActivity(Intent(Intent.ACTION_VIEW, uri))
+        true
+    } catch (_: ActivityNotFoundException) {
+        false
+    } catch (_: SecurityException) {
+        false
     }
 }
 

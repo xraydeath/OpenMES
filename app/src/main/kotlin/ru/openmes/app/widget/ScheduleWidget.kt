@@ -31,6 +31,9 @@ import androidx.glance.text.TextStyle
 import ru.openmes.app.MainActivity
 import ru.openmes.app.notify.upcomingLessons
 import ru.openmes.core.common.runSuspendCatching
+import ru.openmes.core.common.toHM
+import ru.openmes.core.common.toRuDate
+import ru.openmes.core.common.toShortRu
 import ru.openmes.core.model.Lesson
 import java.time.LocalDate
 import java.time.LocalTime
@@ -39,27 +42,15 @@ import java.time.LocalTime
 class ScheduleWidget : GlanceAppWidget() {
 
     override suspend fun provideGlance(context: Context, id: GlanceId) {
-        val day = loadDay()
+        val day = loadWidgetDay()
+        WidgetRefresh.schedule(context, day)
         provideContent {
             GlanceTheme { Content(day) }
         }
     }
 
-    private data class Day(val date: LocalDate, val lessons: List<Lesson>)
-
-    /** Сначала сохранённое расписание (как его грузит экран — по месяцам), без него — сеть. */
-    private suspend fun loadDay(): Day? {
-        val today = LocalDate.now()
-        val now = LocalTime.now()
-        val byDate = upcomingLessons().groupBy { it.date }.toSortedMap()
-        val (date, dayLessons) = byDate.entries.firstOrNull { (date, list) ->
-            date != today || list.any { (it.endTime ?: LocalTime.MAX) > now }
-        } ?: return null
-        return Day(date, dayLessons.sortedBy { it.startTime })
-    }
-
     @Composable
-    private fun Content(day: Day?) {
+    private fun Content(day: WidgetDay?) {
         val colors = GlanceTheme.colors
         Column(
             GlanceModifier
@@ -136,27 +127,40 @@ class ScheduleWidget : GlanceAppWidget() {
         /** Перерисовать все экземпляры (после обновления кэша расписания). */
         suspend fun refresh(context: Context) {
             runSuspendCatching { ScheduleWidget().updateAll(context) }
+            runSuspendCatching { DayWidget().updateAll(context) }
         }
     }
 }
 
 class ScheduleWidgetReceiver : GlanceAppWidgetReceiver() {
     override val glanceAppWidget: GlanceAppWidget = ScheduleWidget()
+
+    override fun onDisabled(context: Context) {
+        super.onDisabled(context)
+        WidgetRefresh.cancelIfUnused(context)
+    }
 }
 
-private val MONTHS_GEN = listOf(
-    "января", "февраля", "марта", "апреля", "мая", "июня",
-    "июля", "августа", "сентября", "октября", "ноября", "декабря",
-)
+/** Ближайший учебный день для виджетов. */
+internal data class WidgetDay(val date: LocalDate, val lessons: List<Lesson>)
 
-private fun dayTitle(date: LocalDate): String {
+/** Сегодня, пока пары не кончились, иначе следующий день с парами. Сначала кэш (как у экрана — по месяцам), без него — сеть. */
+internal suspend fun loadWidgetDay(): WidgetDay? {
+    val today = LocalDate.now()
+    val now = LocalTime.now()
+    val byDate = upcomingLessons().groupBy { it.date }.toSortedMap()
+    val (date, dayLessons) = byDate.entries.firstOrNull { (date, list) ->
+        date != today || list.any { (it.endTime ?: LocalTime.MAX) > now }
+    } ?: return null
+    return WidgetDay(date, dayLessons.sortedBy { it.startTime })
+}
+
+internal fun dayTitle(date: LocalDate): String {
     val today = LocalDate.now()
     val prefix = when (date) {
         today -> "Сегодня"
         today.plusDays(1) -> "Завтра"
-        else -> listOf("Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс")[date.dayOfWeek.value - 1]
+        else -> date.dayOfWeek.toShortRu()
     }
-    return "$prefix, ${date.dayOfMonth} ${MONTHS_GEN[date.monthValue - 1]}"
+    return "$prefix, ${date.toRuDate()}"
 }
-
-private fun LocalTime.toHM(): String = "%02d:%02d".format(hour, minute)
