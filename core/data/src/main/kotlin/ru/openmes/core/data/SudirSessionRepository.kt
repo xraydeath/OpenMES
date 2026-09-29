@@ -202,25 +202,28 @@ class SudirSessionRepository(
         }
 
         // Шаг 5: обмен SUDIR-токена на МЭШ-токен (mesh_access_token = API-токен).
-        val meshAccessToken = exchangeSudirToken(sudirAccessToken)
+        val meshPair = exchangeSudirToken(sudirAccessToken)
 
         withContext(Dispatchers.IO) {
             tokenStore.update { current ->
                 (current ?: AuthTokens()).copy(
-                    meshAccessToken = meshAccessToken,
+                    meshAccessToken = meshPair.access,
+                    meshRefreshToken = meshPair.refresh,
                     meshIssuedAtMillis = System.currentTimeMillis(),
                 )
             }
         }
 
         // Шаг 6: профили.
-        loadProfiles(sudirAccessToken, meshAccessToken)
+        loadProfiles(sudirAccessToken, meshPair.access)
         return true
     }
 
     // -------------------------------------------------------------------
-    // Рефреш: SUDIR /sps/oauth/te → новый access → /v3/auth/sudir/auth → новый mesh
-    // (схема OctoDiary: API-токен — всегда свежий mesh_access_token)
+    // Рефреш: сначала МЭШ v3/token/refresh (штатный долгоживущий механизм колледжа,
+    // mesh_refresh_token), при его отказе — SUDIR /sps/oauth/te → новый access →
+    // /v3/auth/sudir/auth → новый mesh (схема OctoDiary).
+    // Выход из аккаунта — только когда оба механизма явно отвергнуты сервером.
     // -------------------------------------------------------------------
 
     private val refreshLock = Any()
@@ -243,9 +246,29 @@ class SudirSessionRepository(
 
     private suspend fun doRefresh(): RefreshResult {
         val tokens = tokenStore.load() ?: return RefreshResult.NO_SESSION
+
+        // 1. МЭШ-рефреш (v3/token/refresh): продлевает mesh_access_token без SUDIR —
+        //    штатный долгоживущий механизм колледжа. Живёт дольше SUDIR-сессии.
+        var meshRejected = false
+        if (!tokens.meshRefreshToken.isNullOrBlank()) {
+            when (val meshResult = refreshMesh(tokens.meshRefreshToken!!)) {
+                RefreshResult.OK -> return RefreshResult.OK
+                // Явный отказ — mesh_refresh_token мёртв: стираем, пробуем полный SUDIR-флоу.
+                RefreshResult.REJECTED -> {
+                    meshRejected = true
+                    tokenStore.update { it?.copy(meshRefreshToken = null) }
+                }
+                // Сеть/5xx — SUDIR-флоу ниже может всё равно пройти (другой хост).
+                else -> Unit
+            }
+        }
+
         val refreshToken = tokens.sudirRefreshToken
         val clientId = tokens.oauthClientId
-        if (refreshToken.isNullOrBlank() || clientId.isNullOrBlank()) return RefreshResult.NO_SESSION
+        if (refreshToken.isNullOrBlank() || clientId.isNullOrBlank()) {
+            // SUDIR-токенов нет: сессия мертва, только если МЭШ-рефреш был явно отвергнут.
+            return if (meshRejected) RefreshResult.REJECTED else RefreshResult.NO_SESSION
+        }
 
         val tokenResponse = try {
             sudirApi.token(
@@ -285,17 +308,58 @@ class SudirSessionRepository(
             .getOrElse { return RefreshResult.FAILED }
         // Новый mesh недействителен, пока не вызван profile_info; его сбой не критичен.
         runSuspendCatching {
-            meshAuthApi.getProfileInfo(authToken = newMesh, authorization = "Bearer $newMesh")
+            meshAuthApi.getProfileInfo(authToken = newMesh.access, authorization = "Bearer ${newMesh.access}")
         }
 
         applied = false
         tokenStore.update { current ->
             current?.takeIf { it.sudirRefreshToken == newRefresh }?.copy(
-                meshAccessToken = newMesh,
+                meshAccessToken = newMesh.access,
+                meshRefreshToken = newMesh.refresh,
                 meshIssuedAtMillis = System.currentTimeMillis(),
             )?.also { applied = true }
         }
         return if (applied) RefreshResult.OK else RefreshResult.FAILED
+    }
+
+    /**
+     * POST v3/token/refresh → новый mesh_access_token (+ ротированный mesh_refresh_token).
+     * [RefreshResult.REJECTED] — сервер явно отверг refresh-токен (400/401), токен мёртв.
+     */
+    private suspend fun refreshMesh(refreshToken: String): RefreshResult {
+        val response = try {
+            meshAuthApi.refreshMeshToken(refreshToken)
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            val result = classifyRefreshError(e)
+            log("refresh: mesh v3/token/refresh → $result")
+            return result
+        }
+        if (response.accessToken.isBlank()) return RefreshResult.FAILED
+
+        // Ротация: сервер мог выдать новый mesh_refresh_token (старый уже недействителен).
+        // Сохраняем сразу, даже если активация profile_info ниже сорвётся.
+        val newRefresh = response.refreshToken?.takeIf { it.isNotBlank() } ?: refreshToken
+        var applied = false
+        tokenStore.update { current ->
+            current?.takeIf { it.meshRefreshToken == refreshToken }?.copy(
+                meshAccessToken = response.accessToken,
+                meshRefreshToken = newRefresh,
+                meshIssuedAtMillis = System.currentTimeMillis(),
+            )?.also { applied = true }
+        }
+        if (!applied) return RefreshResult.FAILED
+
+        // Новый mesh недействителен, пока не вызван profile_info; его сбой не критичен.
+        runSuspendCatching {
+            meshAuthApi.getProfileInfo(
+                authToken = response.accessToken,
+                authorization = "Bearer ${response.accessToken}",
+            )
+        }
+        log("refresh: mesh v3/token/refresh OK (ротация ${if (newRefresh != refreshToken) "есть" else "нет"})")
+        return RefreshResult.OK
     }
 
     /** Выход после отказа SUDIR — если за это время не вошли заново с другим refresh-токеном. */
@@ -305,8 +369,8 @@ class SudirSessionRepository(
         _session.value = Session.LoggedOut(error = "Сессия истекла — войдите заново")
     }
 
-    /** POST /v3/auth/sudir/auth → mesh_access_token (API-токен МЭШ). */
-    private suspend fun exchangeSudirToken(sudirAccessToken: String): String {
+    /** POST /v3/auth/sudir/auth → mesh_access_token (API-токен МЭШ) + mesh_refresh_token. */
+    private suspend fun exchangeSudirToken(sudirAccessToken: String): MeshTokenPair {
         val response = meshAuthApi.authSudir(
             SudirAuthRequest(
                 userAuthenticationForMobileRequest = SudirAuthRequest.MosAccessTokenPayload(
@@ -319,7 +383,10 @@ class SudirSessionRepository(
         if (mesh.meshAccessToken.isBlank()) {
             throw IllegalStateException("МЭШ вернул пустой mesh_access_token")
         }
-        return mesh.meshAccessToken
+        return MeshTokenPair(
+            access = mesh.meshAccessToken,
+            refresh = mesh.meshRefreshToken.takeIf { it.isNotBlank() },
+        )
     }
 
     override suspend fun selectChild(personId: String) {
@@ -381,9 +448,18 @@ class SudirSessionRepository(
         if (tokens.meshAccessToken != null) {
             log("restoreSession: грузим профили со старым mesh")
             runSuspendCatching { loadProfiles(tokens.sudirAccessToken.orEmpty(), tokens.meshAccessToken) }
-                .onFailure {
-                    log("restoreSession: профили упали: ${it.message}")
-                    _session.value = Session.LoggedOut(error = "Сессия истекла — войдите заново")
+                .onFailure { e ->
+                    log("restoreSession: профили упали: ${e.message}")
+                    // Токены не стираем — перезапуск приложения повторит попытку.
+                    // «Истекла» — только явный отказ авторизации; сеть/5xx честно называем сетью.
+                    val authFailure = e is retrofit2.HttpException && e.code() in 401..403
+                    _session.value = Session.LoggedOut(
+                        error = if (authFailure) {
+                            "Сессия истекла — войдите заново"
+                        } else {
+                            "Не удалось загрузить профиль: нет связи. Попробуйте перезапустить приложение"
+                        },
+                    )
                 }
         } else {
             log("restoreSession: → LoggedOut (нет mesh)")
@@ -510,6 +586,12 @@ class SudirSessionRepository(
     }
 }
 
+/** Результат обмена SUDIR-токена на МЭШ: короткоживущий access + долгоживущий refresh. */
+internal data class MeshTokenPair(
+    val access: String,
+    val refresh: String?,
+)
+
 /** Итог обновления токенов. */
 internal enum class RefreshResult {
     OK,
@@ -524,7 +606,7 @@ internal enum class RefreshResult {
     NO_SESSION,
 }
 
-/** Разбор ошибки /sps/oauth/te: выход из аккаунта — только при явном отказе сервера. */
+/** Разбор ошибки /sps/oauth/te и v3/token/refresh: выход из аккаунта — только при явном отказе сервера. */
 internal fun classifyRefreshError(e: Throwable): RefreshResult = when {
     e is retrofit2.HttpException && e.code() in REJECTED_CODES -> RefreshResult.REJECTED
     else -> RefreshResult.FAILED

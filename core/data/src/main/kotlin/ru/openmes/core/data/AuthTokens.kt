@@ -13,6 +13,8 @@ data class AuthTokens(
     val sudirExpiresAtMillis: Long? = null,
     // МЭШ-токены (mesh_access_token = aupd_token).
     val meshAccessToken: String? = null,
+    /** МЭШ refresh-токен — продление mesh_access_token без повторного входа (штатный механизм колледжа). */
+    val meshRefreshToken: String? = null,
     /** Когда получен [meshAccessToken] (питание/проходы на свежий токен не обновляем). */
     val meshIssuedAtMillis: Long? = null,
     // Текущий профиль.

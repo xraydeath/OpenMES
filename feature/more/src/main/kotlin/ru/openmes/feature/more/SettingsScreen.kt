@@ -75,7 +75,7 @@ fun SettingsScreen(
     viewModel: MoreViewModel,
     onOpenCache: () -> Unit,
     onOpenNotifications: () -> Unit,
-    onOpenApiConsole: () -> Unit,
+    onOpenApiConsole: (() -> Unit)?,
 ) {
     val settings by viewModel.settings.collectAsStateWithLifecycle()
     val context = LocalContext.current
@@ -230,11 +230,12 @@ fun SettingsScreen(
                             runCatching { context.packageManager.getPackageInfo(context.packageName, 0).versionName }.getOrNull()
                         }
                         // Скрытый вход в отладочную консоль API: 7 нажатий на версию.
+                        // null в релизе — вход закрыт.
                         var versionTaps by remember { mutableIntStateOf(0) }
                         Text(
                             "Версия ${version.orEmpty()}",
                             style = MaterialTheme.typography.bodySmall,
-                            modifier = Modifier.clickable(
+                            modifier = if (onOpenApiConsole != null) Modifier.clickable(
                                 interactionSource = null,
                                 indication = null,
                             ) {
@@ -242,7 +243,7 @@ fun SettingsScreen(
                                     versionTaps = 0
                                     onOpenApiConsole()
                                 }
-                            },
+                            } else Modifier,
                         )
                     }
                 }

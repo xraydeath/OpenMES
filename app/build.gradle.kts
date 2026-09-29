@@ -10,13 +10,18 @@ android {
     namespace = "ru.openmes.app"
     compileSdk = 36
 
+    buildFeatures {
+        // BuildConfig.DEBUG гейтит отладочную консоль API (вход по 7 тапам на версию).
+        buildConfig = true
+    }
+
     defaultConfig {
         applicationId = "ru.openmes.app"
         minSdk = 26
         targetSdk = 36
         // versionCode — номер сборки GitHub Actions: каждая сборка ставится поверх предыдущей.
         versionCode = System.getenv("BUILD_NUMBER")?.toIntOrNull() ?: 1
-        versionName = "0.4.0"
+        versionName = "0.5.0"
     }
 
     // Ключ релизов из окружения (GitHub Actions secrets). Без него — debug-ключ.

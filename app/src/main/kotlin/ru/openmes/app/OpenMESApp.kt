@@ -71,6 +71,8 @@ class OpenMESApp : Application(), SingletonImageLoader.Factory {
         wireMarksPolling()
         wireWidgetRefresh()
         wireReminders()
+        // Продление сессии в фоне — всегда: без токенов refresh безопасно ничего не делает.
+        TokenRefreshWorker.schedule(this)
     }
 
     /** Картинки новостей грузим через общий OkHttp-клиент, а не отдельный, который Coil создал бы сам. */

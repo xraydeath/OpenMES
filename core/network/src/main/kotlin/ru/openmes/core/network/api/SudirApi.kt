@@ -3,6 +3,7 @@ package ru.openmes.core.network.api
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import retrofit2.http.Body
+import retrofit2.http.Field
 import retrofit2.http.FieldMap
 import retrofit2.http.FormUrlEncoded
 import retrofit2.http.GET
@@ -93,7 +94,23 @@ interface MeshAuthApi {
         @Header("Authorization") authorization: String,
         @Header("partner-source-id") partnerSourceId: String = "MOBILE",
     ): List<ProfileInfoDto>
+
+    /**
+     * POST v3/token/refresh → продление mesh_access_token без повторного входа
+     * (штатный долгоживущий механизм колледжа; refresh-токен — в теле формы).
+     */
+    @FormUrlEncoded
+    @POST("v3/token/refresh")
+    suspend fun refreshMeshToken(
+        @Field("refresh_token") refreshToken: String,
+    ): MeshRefreshResponse
 }
+
+@Serializable
+data class MeshRefreshResponse(
+    @SerialName("access_token") val accessToken: String = "",
+    @SerialName("refresh_token") val refreshToken: String? = null,
+)
 
 
 

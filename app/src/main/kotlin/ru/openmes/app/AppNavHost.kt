@@ -318,11 +318,14 @@ fun AppNavHost() {
                         viewModel = koinViewModel(),
                         onOpenCache = { navController.navigate("cache_settings") },
                         onOpenNotifications = { navController.navigate("notification_settings") },
-                        onOpenApiConsole = { navController.navigate("api_console") },
+                        // Отладочная консоль API — только в debug-сборках.
+                        onOpenApiConsole = if (BuildConfig.DEBUG) {
+                            { navController.navigate("api_console") }
+                        } else null,
                     )
                 }
 
-                composable("api_console") {
+                if (BuildConfig.DEBUG) composable("api_console") {
                     ApiConsoleScreen(viewModel = koinViewModel())
                 }
 
