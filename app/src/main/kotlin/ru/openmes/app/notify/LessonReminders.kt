@@ -14,6 +14,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import org.koin.core.context.GlobalContext
 import ru.openmes.core.common.toHM
+import ru.openmes.core.data.NotificationDetails
 import ru.openmes.core.data.SettingsRepository
 import ru.openmes.core.model.Lesson
 import java.time.Duration
@@ -86,7 +87,14 @@ object LessonReminders {
             )
             builder.addAction(0, "Подключиться", join)
         }
-        Notifications.post(context, key.hashCode(), builder)
+        Notifications.post(
+            context, key.hashCode(), builder,
+            NotificationDetails(
+                subject = subject,
+                teacher = intent.getStringExtra(EXTRA_TEACHER),
+                dayIso = LocalDate.now().toString(),
+            ),
+        )
     }
 
     /** Пример из настроек: ближайшая пара из сохранённого расписания, если её нет — выдуманная. */

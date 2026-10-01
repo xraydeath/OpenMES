@@ -16,6 +16,7 @@ import org.koin.core.component.inject
 import ru.openmes.core.common.humanize
 import ru.openmes.core.common.runSuspendCatching
 import ru.openmes.core.data.DiaryRepository
+import ru.openmes.core.data.NotificationDetails
 import ru.openmes.core.data.SettingsRepository
 import java.time.LocalDate
 import java.time.LocalDateTime
@@ -70,12 +71,18 @@ class ScheduleChangesWorker(
 
         changes.groupBy { it.date }.forEach { (date, dayChanges) ->
             val lines = dayChanges.map { it.text }
+            // Предмет и преподаватель — только когда за день они однозначны.
+            val subject = dayChanges.mapNotNull { it.subject }.distinct().singleOrNull()
+            val teacher = dayChanges.mapNotNull { it.teacher }.distinct().singleOrNull()
             val builder = Notifications.builder(applicationContext, Notifications.Channel.SCHEDULE)
                 .setContentTitle("Изменения в расписании: ${date.humanize().replaceFirstChar(Char::lowercase)}")
                 .setContentText(lines.first() + if (lines.size > 1) " и ещё ${lines.size - 1}" else "")
                 .setStyle(NotificationCompat.BigTextStyle().bigText(lines.joinToString("\n")))
                 .setGroup(Notifications.Channel.SCHEDULE.id)
-            Notifications.post(applicationContext, ID_BASE + date.dayOfYear, builder)
+            Notifications.post(
+                applicationContext, ID_BASE + date.dayOfYear, builder,
+                NotificationDetails(subject = subject, teacher = teacher, dayIso = date.toString()),
+            )
         }
         // Напоминания о парах — по новому расписанию.
         runSuspendCatching { LessonReminders.reschedule(applicationContext) }

@@ -195,4 +195,5 @@ private val appModule = module {
     viewModel { ProforientationViewModel(get(), get()) }
     viewModel { PortfolioViewModel(get(), get()) }
     viewModel { ApiConsoleViewModel(get()) }
+    viewModel { ru.openmes.feature.more.NotificationHistoryViewModel(get()) }
 }

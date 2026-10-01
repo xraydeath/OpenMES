@@ -3,6 +3,7 @@ package ru.openmes.feature.schedule
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
+import androidx.compose.foundation.background
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.layout.Arrangement
@@ -41,6 +42,7 @@ import android.content.Context
 import android.content.Intent
 import android.widget.Toast
 import androidx.core.content.FileProvider
+import ru.openmes.core.model.AbsenceReason
 import ru.openmes.core.model.DayInfo
 import java.io.File
 import androidx.compose.material3.ButtonDefaults
@@ -69,7 +71,14 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.unit.Velocity
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -158,6 +167,8 @@ fun ScheduleScreen(viewModel: ScheduleViewModel) {
         ModalBottomSheet(
             onDismissRequest = viewModel::closeLessonDetails,
             sheetState = sheetState,
+            // Свои ручки вместо стандартной: у той есть «нажимная» анимация, как у кнопки.
+            dragHandle = { SheetHandle() },
         ) {
             LessonDetailsSheet(details, loading = viewModel.lessonDetailsLoading)
         }
@@ -410,6 +421,8 @@ private fun LessonsGroup(
                     val current = time != null && lesson.startTime != null && lesson.endTime != null &&
                         time >= lesson.startTime && time < lesson.endTime
                     val details = detailsOf(lesson)
+                    // eventcalendar шлёт is_missed_lesson=false: пропуск реально приходит только
+                    // из lesson_schedule_items — деталями, которые префетчатся на выбранный день ±1.
                     LessonCard(
                         lesson = lesson,
                         number = planNumbers[row.index],
@@ -417,6 +430,8 @@ private fun LessonsGroup(
                         status = details?.diseaseStatusType,
                         distance = lesson.isDistance || details?.isDistance == true,
                         test = isTest(lesson),
+                        missed = lesson.isMissedLesson || details?.isMissedLesson == true,
+                        missedReasonId = lesson.absenceReasonId ?: details?.absenceReasonId,
                         shape = shape,
                         onClick = { onLessonClick(lesson) },
                     )
@@ -458,6 +473,8 @@ private fun LessonCard(
     status: String?,
     distance: Boolean,
     test: Boolean,
+    missed: Boolean,
+    missedReasonId: Int?,
     shape: Shape,
     onClick: () -> Unit,
 ) {
@@ -535,6 +552,7 @@ private fun LessonCard(
                     horizontalArrangement = Arrangement.spacedBy(4.dp),
                 ) {
                     if (status != null) DiseaseStatusIcon(status)
+                    if (missed) MiniAbsence(missedReasonId)
                     if (test) {
                         Icon(
                             Icons.Rounded.Quiz,
@@ -559,7 +577,13 @@ private fun LessonCard(
                             tint = secondary,
                         )
                     }
-                    lesson.marks.forEach { mark -> MiniMark(mark.value, mark.weight) }
+                    // Пропуск может прийти и флагом, и оценкой «Н» — не дублируем бейдж.
+                    val marks = if (missed) {
+                        lesson.marks.filterNot { it.value.trim().equals("Н", ignoreCase = true) }
+                    } else {
+                        lesson.marks
+                    }
+                    marks.forEach { mark -> MiniMark(mark.value, mark.weight) }
                 }
             }
         }
@@ -594,9 +618,52 @@ private fun MiniMark(value: String, weight: Int?) {
     }
 }
 
+/**
+ * Значок пропуска в строке урока: «Н» в красной плашке, по размеру как компактная оценка.
+ * Причина (если сервер её прислал) — в contentDescription и в шторке деталей урока.
+ */
+@Composable
+private fun MiniAbsence(reasonId: Int?) {
+    val reason = AbsenceReason.byId(reasonId)?.title
+    Surface(
+        modifier = Modifier.size(26.dp),
+        shape = MaterialShapes.Circle.toShape(),
+        color = MaterialTheme.colorScheme.errorContainer,
+        contentColor = MaterialTheme.colorScheme.onErrorContainer,
+    ) {
+        Box(contentAlignment = Alignment.Center) {
+            Text(
+                "Н",
+                style = MaterialTheme.typography.labelMediumEmphasized,
+                maxLines = 1,
+                modifier = Modifier.semantics {
+                    contentDescription = if (reason != null) "Пропуск: $reason" else "Пропуск"
+                },
+            )
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // BottomSheet деталей урока (стиль OctoDiary LessonSheetContent)
 // ---------------------------------------------------------------------------
+
+/** Ручка шторки: просто полоска, без отклика на нажатие — это не кнопка. */
+@Composable
+private fun SheetHandle() {
+    Box(
+        Modifier
+            .fillMaxWidth()
+            .padding(top = 12.dp, bottom = 12.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Box(
+            Modifier
+                .size(width = 32.dp, height = 4.dp)
+                .background(MaterialTheme.colorScheme.onSurfaceVariant, CircleShape),
+        )
+    }
+}
 
 @Composable
 private fun LessonDetailsSheet(details: LessonDetails, loading: Boolean) {
@@ -609,12 +676,27 @@ private fun LessonDetailsSheet(details: LessonDetails, loading: Boolean) {
         details.comment?.takeIf { it.isNotBlank() }?.let { Triple(Icons.AutoMirrored.Rounded.Comment, "Комментарий", it) },
     )
 
+    // Шторка раскрыта полностью: гасим остаток жеста вверх, который содержимое
+    // уже не прокручивает, — иначе шторка вздрагивает (resist-and-snap) вместо «ничего».
+    val absorbLeftoverUp = remember {
+        object : NestedScrollConnection {
+            override fun onPostScroll(consumed: Offset, available: Offset, source: NestedScrollSource): Offset =
+                if (available.y < 0) available else Offset.Zero
+
+            override suspend fun onPostFling(consumed: Velocity, available: Velocity): Velocity =
+                if (available.y < 0) available else Velocity.Zero
+        }
+    }
+
     // Всё содержимое урока (ДЗ, тема, учитель) можно выделить и скопировать.
     SelectionContainer {
         Column(
             Modifier
                 .fillMaxWidth()
-                .verticalScroll(rememberScrollState())
+                // Порядок важен: nestedScroll снаружи verticalScroll — тогда остаток
+                // прокрутки гасится раньше, чем его получит шторка.
+                .nestedScroll(absorbLeftoverUp)
+                .verticalScroll(rememberScrollState(), overscrollEffect = null)
                 .padding(horizontal = 16.dp)
                 .padding(bottom = 24.dp),
             verticalArrangement = Arrangement.spacedBy(GroupGap),
@@ -654,6 +736,18 @@ private fun LessonDetailsSheet(details: LessonDetails, loading: Boolean) {
                     icon = Icons.Rounded.Healing,
                     containerColor = container,
                     contentColor = content,
+                    modifier = Modifier.padding(bottom = 8.dp),
+                )
+            }
+
+            // Пропуск: преподаватель отметил отсутствие на занятии
+            if (details.isMissedLesson) {
+                val reason = AbsenceReason.byId(details.absenceReasonId)?.title
+                StatusPill(
+                    text = "Не был${reason?.let { " · $it" }.orEmpty()}",
+                    icon = Icons.Rounded.EventBusy,
+                    containerColor = MaterialTheme.colorScheme.errorContainer,
+                    contentColor = MaterialTheme.colorScheme.onErrorContainer,
                     modifier = Modifier.padding(bottom = 8.dp),
                 )
             }

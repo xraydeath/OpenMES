@@ -2,6 +2,7 @@ package ru.openmes.app.notify
 
 import android.Manifest
 import android.app.AlarmManager
+import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
@@ -19,9 +20,13 @@ import ru.openmes.app.MainActivity
 import ru.openmes.app.R
 import ru.openmes.core.common.runSuspendCatching
 import ru.openmes.core.data.DiaryRepository
+import ru.openmes.core.data.NotificationDetails
+import ru.openmes.core.data.NotificationHistory
+import ru.openmes.core.data.NotificationRecord
 import ru.openmes.core.data.Session
 import ru.openmes.core.data.SessionRepository
 import ru.openmes.core.model.Lesson
+import ru.openmes.feature.more.TestNotification
 import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.YearMonth
@@ -36,6 +41,7 @@ object Notifications {
         LESSONS("lessons", "Начало пар", NotificationManager.IMPORTANCE_HIGH),
         SCHEDULE("schedule_changes", "Изменения в расписании", NotificationManager.IMPORTANCE_HIGH),
         EVENING("evening", "ДЗ и контрольные на завтра", NotificationManager.IMPORTANCE_DEFAULT),
+        HOMEWORK("homework", "Домашние задания", NotificationManager.IMPORTANCE_DEFAULT),
     }
 
     fun canPost(context: Context): Boolean =
@@ -51,10 +57,50 @@ object Notifications {
             .setAutoCancel(true)
     }
 
-    fun post(context: Context, id: Int, builder: NotificationCompat.Builder) {
+    fun post(
+        context: Context,
+        id: Int,
+        builder: NotificationCompat.Builder,
+        details: NotificationDetails? = null,
+    ) {
         if (!canPost(context)) return
-        NotificationManagerCompat.from(context).notify(id, builder.build())
+        val notification = builder.build()
+        NotificationManagerCompat.from(context).notify(id, notification)
+        // Каждое показанное уведомление — в историю (экран «История уведомлений»).
+        GlobalContext.getOrNull()?.get<NotificationHistory>()?.append(
+            NotificationRecord(
+                timeMillis = System.currentTimeMillis(),
+                channelId = notification.channelId.orEmpty(),
+                title = notification.extras.getCharSequence(Notification.EXTRA_TITLE)?.toString().orEmpty(),
+                text = notification.extras.getCharSequence(Notification.EXTRA_TEXT)?.toString().orEmpty(),
+                details = details,
+            ),
+        )
     }
+
+    /** Пример уведомления из настроек (раздел «Проверка»): как выглядит каждый тип. */
+    fun postSample(context: Context, kind: TestNotification) {
+        val sample = when (kind) {
+            TestNotification.NewMark -> Sample(Channel.MARKS, 9001, "Математика", "Оценка 5 (вес 2) · Контрольная работа · за сегодня")
+            TestNotification.MarkChanged -> Sample(Channel.MARKS, 9002, "Математика", "Оценка изменена: 4 → 5 · за сегодня")
+            TestNotification.NewHomework -> Sample(Channel.HOMEWORK, 9003, "Информатика", "Новое задание: §12, задачи 1–5 · на завтра")
+            TestNotification.HomeworkChanged -> Sample(Channel.HOMEWORK, 9004, "Информатика", "Задание изменилось: §12, задачи 1–12 · на завтра")
+            TestNotification.ScheduleChanged -> Sample(Channel.SCHEDULE, 9005, "Расписание изменено", "Математика перенесена на 2-ю пару, кабинет 214 · завтра")
+        }
+        val builder = builder(context, sample.channel)
+            .setContentTitle(sample.title)
+            .setContentText(sample.text)
+            .setGroup(sample.channel.id)
+        post(context, sample.id, builder)
+    }
+
+    /** Данные примера для [postSample]. */
+    private data class Sample(
+        val channel: Channel,
+        val id: Int,
+        val title: String,
+        val text: String,
+    )
 
     fun openApp(context: Context): PendingIntent = PendingIntent.getActivity(
         context,

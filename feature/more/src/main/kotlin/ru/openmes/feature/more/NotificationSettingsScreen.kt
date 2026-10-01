@@ -21,7 +21,9 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.MenuBook
 import androidx.compose.material.icons.rounded.AlarmOn
+import androidx.compose.material.icons.rounded.Assignment
 import androidx.compose.material.icons.rounded.EditCalendar
+import androidx.compose.material.icons.rounded.Grade
 import androidx.compose.material.icons.rounded.MeetingRoom
 import androidx.compose.material.icons.rounded.NotificationsActive
 import androidx.compose.material.icons.rounded.NotificationsOff
@@ -84,13 +86,15 @@ class NotificationSettingsViewModel(
 
 /**
  * Уведомления: новые оценки, начало пар, вечером — ДЗ и контрольные на завтра.
- * [onPreviewLesson] показывает пример напоминания о паре, [onCheckEvening] — запускает вечернюю проверку сейчас.
+ * [onPreviewLesson] показывает пример напоминания о паре, [onCheckEvening] — запускает вечернюю проверку сейчас,
+ * [onTestNotification] — показывает пример уведомления выбранного типа.
  */
 @Composable
 fun NotificationSettingsScreen(
     viewModel: NotificationSettingsViewModel,
     onPreviewLesson: () -> Unit,
     onCheckEvening: () -> Unit,
+    onTestNotification: (TestNotification) -> Unit,
 ) {
     val settings by viewModel.settings.collectAsStateWithLifecycle()
     val context = LocalContext.current
@@ -293,6 +297,55 @@ fun NotificationSettingsScreen(
         }
     }
 
+    /** Раздел «Проверка»: кнопки-примеры, каждый тип уведомления можно увидеть сразу. */
+    val tests = buildList<@Composable (Shape) -> Unit> {
+        add { shape ->
+            MesListItem(
+                headline = "Новая оценка",
+                supporting = "Математика · оценка 5 (вес 2) · за сегодня",
+                icon = Icons.Rounded.Grade,
+                onClick = { onTestNotification(TestNotification.NewMark) },
+                shape = shape,
+            )
+        }
+        add { shape ->
+            MesListItem(
+                headline = "Изменение оценки",
+                supporting = "Математика · оценка изменена: 4 → 5 · за сегодня",
+                icon = Icons.Rounded.Grade,
+                onClick = { onTestNotification(TestNotification.MarkChanged) },
+                shape = shape,
+            )
+        }
+        add { shape ->
+            MesListItem(
+                headline = "Новое ДЗ",
+                supporting = "Информатика · новое задание: §12, задачи 1–5 · на завтра",
+                icon = Icons.Rounded.Assignment,
+                onClick = { onTestNotification(TestNotification.NewHomework) },
+                shape = shape,
+            )
+        }
+        add { shape ->
+            MesListItem(
+                headline = "Изменение ДЗ",
+                supporting = "Информатика · задание изменилось: §12, задачи 1–12 · на завтра",
+                icon = Icons.Rounded.Assignment,
+                onClick = { onTestNotification(TestNotification.HomeworkChanged) },
+                shape = shape,
+            )
+        }
+        add { shape ->
+            MesListItem(
+                headline = "Изменение расписания",
+                supporting = "Математика перенесена на 2-ю пару, кабинет 214 · завтра",
+                icon = Icons.Rounded.EditCalendar,
+                onClick = { onTestNotification(TestNotification.ScheduleChanged) },
+                shape = shape,
+            )
+        }
+    }
+
     val evening = buildList<@Composable (Shape) -> Unit> {
         add { shape ->
             SwitchItem(
@@ -370,6 +423,9 @@ fun NotificationSettingsScreen(
         item { SectionHeader("Вечером накануне", Modifier.padding(top = 12.dp)) }
         group(evening)
 
+        item { SectionHeader("Проверка", Modifier.padding(top = 12.dp)) }
+        group(tests)
+
         item {
             Text(
                 "Напоминания о парах берутся из сохранённого расписания — оно обновляется в фоне и при открытии приложения. " +
@@ -385,6 +441,9 @@ fun NotificationSettingsScreen(
 
 /** Что включить, когда пользователь ответит на запрос разрешения. */
 private enum class PendingEnable { Marks, Lessons, Homework, Tests, ScheduleChanges, PreviewLesson, CheckEvening }
+
+/** Типы тестовых уведомлений для раздела «Проверка» в настройках. */
+enum class TestNotification { NewMark, MarkChanged, NewHomework, HomeworkChanged, ScheduleChanged }
 
 private tailrec fun Context.findActivity(): Activity? = when (this) {
     is Activity -> this

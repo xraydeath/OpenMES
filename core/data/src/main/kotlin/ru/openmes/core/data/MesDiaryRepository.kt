@@ -448,6 +448,8 @@ class MesDiaryRepository(
             homeworkDone = dto.lessonHomeworks.firstOrNull()?.isDone ?: false,
             marks = dto.marks.map { Mark(id = it.id.toString(), value = it.value, weight = it.weight) },
             isDistance = dto.isVirtual || dto.remoteLesson != null,
+            isMissedLesson = dto.isMissedLesson || dto.nonattendanceReasonId != null,
+            absenceReasonId = dto.nonattendanceReasonId?.toInt(),
         )
     }
 
@@ -614,6 +616,10 @@ class MesDiaryRepository(
             joinUrl = linkToJoin?.takeIf { it.isNotBlank() },
             source = source,
             lessonForm = lessonForm?.name,
+            // Пропуск мог прийти как флагом is_missed_lesson, так и одной из причин:
+            // eventcalendar шлёт nonattendance_reason_id, OpenAPI-спека — absence_reason_id.
+            isMissedLesson = isMissedLesson || nonattendanceReasonId != null || absenceReasonId != null,
+            absenceReasonId = (nonattendanceReasonId ?: absenceReasonId)?.toInt(),
         )
     }
 

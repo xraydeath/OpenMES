@@ -414,6 +414,7 @@ data class LessonScheduleItemDto(
     @SerialName("lesson_homeworks") val lessonHomeworks: List<LessonHomeworkDto> = emptyList(),
     @SerialName("remote_lesson") val remoteLesson: RemoteLessonDto? = null,
     @SerialName("is_virtual") val isVirtual: Boolean = false,
+    @SerialName("is_missed_lesson") val isMissedLesson: Boolean = false,
     @SerialName("nonattendance_reason_id") val nonattendanceReasonId: Long? = null,
     @SerialName("comment") val comment: String? = null,
     @SerialName("disease_status_type") val diseaseStatusType: String? = null,

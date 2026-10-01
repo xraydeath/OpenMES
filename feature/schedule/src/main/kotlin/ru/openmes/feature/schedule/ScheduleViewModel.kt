@@ -270,6 +270,8 @@ class ScheduleViewModel(
             marks = lesson.marks,
             isDistance = lesson.isDistance,
             joinUrl = lesson.joinUrl,
+            isMissedLesson = lesson.isMissedLesson,
+            absenceReasonId = lesson.absenceReasonId,
         ).withLesson(lesson)
         detailsJob = viewModelScope.launch {
             lessonDetailsLoading = true
@@ -289,6 +291,8 @@ class ScheduleViewModel(
         joinUrl = joinUrl ?: lesson.joinUrl,
         module = module ?: _state.value.moduleFor(lesson)?.name,
         testName = testName ?: _state.value.testFor(lesson)?.let { it.name ?: "Контрольное занятие" },
+        isMissedLesson = isMissedLesson || lesson.isMissedLesson,
+        absenceReasonId = absenceReasonId ?: lesson.absenceReasonId,
     )
 
     fun closeLessonDetails() {

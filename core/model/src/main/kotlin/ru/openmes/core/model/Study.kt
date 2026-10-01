@@ -44,6 +44,10 @@ data class Lesson(
     val source: String? = null,
     /** Форма занятия («Практическое занятие»). */
     val lessonForm: String? = null,
+    /** Пропуск: преподаватель отметил отсутствие на этом занятии (is_missed_lesson). */
+    val isMissedLesson: Boolean = false,
+    /** Причина пропуска (nonattendance/absence reason id 1..12) — приходит не всегда. */
+    val absenceReasonId: Int? = null,
 )
 
 /** Оценка. value — строка: «5», «4.5», «Зачёт», «Н» и т.д. */

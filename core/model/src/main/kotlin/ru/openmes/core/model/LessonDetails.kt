@@ -27,4 +27,8 @@ data class LessonDetails(
     val module: String? = null,
     /** Форма контроля, если урок — контрольное занятие (test_lessons). */
     val testName: String? = null,
+    /** Пропуск занятия (is_missed_lesson) — ставится преподавателем индивидуально. */
+    val isMissedLesson: Boolean = false,
+    /** Причина пропуска (nonattendance_reason_id 1..12). */
+    val absenceReasonId: Int? = null,
 )

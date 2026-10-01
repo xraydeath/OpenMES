@@ -73,7 +73,13 @@ fun diffWindow(
 }
 
 /** Изменение в расписании за день [date]. */
-data class ScheduleChange(val date: LocalDate, val start: LocalTime?, val text: String)
+data class ScheduleChange(
+    val date: LocalDate,
+    val start: LocalTime?,
+    val text: String,
+    val subject: String? = null,
+    val teacher: String? = null,
+)
 
 /**
  * Разница двух снимков. Пару сначала сопоставляем по id, затем (замена предмета — новый id)
@@ -102,13 +108,20 @@ fun diffSchedules(
         unmatchedOld -= o
         unmatchedNew -= n
         if (o.subject != n.subject) {
-            changes += ScheduleChange(n.date, n.start, "${n.start.hm()} замена: ${o.subject} → ${n.subject}")
+            changes += ScheduleChange(
+                n.date, n.start, "${n.start.hm()} замена: ${o.subject} → ${n.subject}",
+                subject = n.subject, teacher = n.teacher,
+            )
         } else {
             changes += compare(o, n, includeRooms, includeTeachers)
         }
     }
-    unmatchedOld.forEach { o -> changes += ScheduleChange(o.date, o.start, "${o.start.hm()} отменена: ${o.subject}") }
-    unmatchedNew.forEach { n -> changes += ScheduleChange(n.date, n.start, "${n.start.hm()} новая пара: ${n.subject}${n.where()}") }
+    unmatchedOld.forEach { o ->
+        changes += ScheduleChange(o.date, o.start, "${o.start.hm()} отменена: ${o.subject}", subject = o.subject, teacher = o.teacher)
+    }
+    unmatchedNew.forEach { n ->
+        changes += ScheduleChange(n.date, n.start, "${n.start.hm()} новая пара: ${n.subject}${n.where()}", subject = n.subject, teacher = n.teacher)
+    }
     return changes.sortedWith(compareBy({ it.date }, { it.start }))
 }
 
@@ -122,7 +135,12 @@ private fun compare(o: SlotSnapshot, n: SlotSnapshot, includeRooms: Boolean, inc
     }
     if (parts.isEmpty()) return emptyList()
     val at = if (o.start != n.start) o.start else n.start
-    return listOf(ScheduleChange(n.date, n.start, "${at.hm()} ${n.subject}: ${parts.joinToString(", ")}"))
+    return listOf(
+        ScheduleChange(
+            n.date, n.start, "${at.hm()} ${n.subject}: ${parts.joinToString(", ")}",
+            subject = n.subject, teacher = n.teacher,
+        ),
+    )
 }
 
 private fun SlotSnapshot.where(): String = when {

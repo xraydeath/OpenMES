@@ -3,11 +3,14 @@ package ru.openmes.app
 import androidx.compose.animation.core.FastOutLinearInEasing
 import androidx.compose.animation.core.LinearOutSlowInEasing
 import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.activity.ComponentActivity
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.background
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -15,6 +18,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
@@ -27,6 +31,7 @@ import androidx.compose.material.icons.outlined.Widgets
 import androidx.compose.material.icons.rounded.CalendarMonth
 import androidx.compose.material.icons.rounded.CloudOff
 import androidx.compose.material.icons.rounded.Grade
+import androidx.compose.material.icons.rounded.Notifications
 import androidx.compose.material.icons.rounded.Widgets
 import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.Icon
@@ -79,6 +84,7 @@ import kotlin.math.roundToInt
 import org.koin.compose.koinInject
 import org.koin.compose.viewmodel.koinViewModel
 import org.koin.core.parameter.parametersOf
+import ru.openmes.core.data.NotificationHistory
 import ru.openmes.core.data.Session
 import ru.openmes.core.data.SessionRepository
 import ru.openmes.core.designsystem.components.LocalPullToRefreshEnabled
@@ -93,6 +99,7 @@ import ru.openmes.feature.more.VisitsScreen
 import ru.openmes.feature.more.FoodScreen
 import ru.openmes.feature.more.NewsDetailScreen
 import ru.openmes.feature.more.NewsScreen
+import ru.openmes.feature.more.NotificationHistoryScreen
 import ru.openmes.feature.more.PortfolioScreen
 import ru.openmes.feature.more.ProforientationScreen
 import ru.openmes.feature.more.SchoolInfoScreen
@@ -102,6 +109,7 @@ import ru.openmes.feature.more.CacheSettingsScreen
 import ru.openmes.feature.more.NotificationSettingsScreen
 import ru.openmes.app.notify.EveningReminders
 import ru.openmes.app.notify.LessonReminders
+import ru.openmes.app.notify.Notifications
 import ru.openmes.feature.more.StudentCardScreen
 import ru.openmes.feature.schedule.ScheduleScreen
 
@@ -137,10 +145,23 @@ private val screenTitles = mapOf(
     "settings" to "Настройки",
     "cache_settings" to "Кэш и офлайн",
     "notification_settings" to "Уведомления",
+    "notification_history" to "История уведомлений",
     "api_console" to "Консоль API",
 )
 
 private val authRoutes = setOf("login")
+
+/**
+ * Экраны без колокольчика истории: в «Ещё», настройках (и их подразделах)
+ * и на самой истории он не нужен — там до уведомлений другие пути.
+ */
+private val bellHiddenRoutes = setOf(
+    "more",
+    "settings",
+    "notification_settings",
+    "cache_settings",
+    "notification_history",
+)
 
 @Composable
 fun AppNavHost() {
@@ -185,6 +206,9 @@ fun AppNavHost() {
                     showBack = !showBottomBar,
                     onBack = { navController.navigateUp() },
                     scrollBehavior = scrollBehavior,
+                    trailing = if (session is Session.LoggedIn) {
+                        { HistoryBell(visible = currentRoute !in bellHiddenRoutes, onClick = { navController.navigate("notification_history") }) }
+                    } else null,
                 )
             }
         },
@@ -329,12 +353,17 @@ fun AppNavHost() {
                     ApiConsoleScreen(viewModel = koinViewModel())
                 }
 
+                composable("notification_history") {
+                    NotificationHistoryScreen(viewModel = koinViewModel())
+                }
+
                 composable("notification_settings") {
                     val context = LocalContext.current
                     NotificationSettingsScreen(
                         viewModel = koinViewModel(),
                         onPreviewLesson = { LessonReminders.showPreview(context) },
                         onCheckEvening = { EveningReminders.runNow(context) },
+                        onTestNotification = { Notifications.postSample(context, it) },
                     )
                 }
 
@@ -343,6 +372,45 @@ fun AppNavHost() {
                 }
             }
           }
+        }
+    }
+}
+
+/** Колокольчик истории уведомлений: точка на круге кнопки, пока есть записи новее последнего просмотра. */
+@Composable
+private fun HistoryBell(visible: Boolean, onClick: () -> Unit) {
+    val history = koinInject<NotificationHistory>()
+    val entries by history.entries.collectAsStateWithLifecycle()
+    val seen by history.lastSeenMillis.collectAsStateWithLifecycle()
+    val unread = entries.count { it.timeMillis > seen }
+    AnimatedVisibility(
+        visible = visible,
+        enter = BellIn,
+        exit = BellOut,
+    ) {
+        Box(contentAlignment = Alignment.Center) {
+            FilledTonalIconButton(onClick = onClick, shapes = IconButtonDefaults.shapes()) {
+                Icon(
+                    Icons.Rounded.Notifications,
+                    contentDescription = if (unread > 0) {
+                        "История уведомлений, непрочитанных: $unread"
+                    } else {
+                        "История уведомлений"
+                    },
+                )
+            }
+            // Точка рисуем сами, а не через BadgedBox: тот целит бейдж в угол
+            // ограничивающего квадрата, а кнопка круглая — на углах квадрата точка
+            // оказывалась далеко за окружностью. Здесь она лежит ровно на круге.
+            if (unread > 0) {
+                Box(
+                    Modifier
+                        .align(Alignment.Center)
+                        .offset(x = BellDotOffset, y = -BellDotOffset)
+                        .size(BellDotSize)
+                        .background(MaterialTheme.colorScheme.error, CircleShape),
+                )
+            }
         }
     }
 }
@@ -358,6 +426,7 @@ private fun CollapsingTopBar(
     showBack: Boolean,
     onBack: () -> Unit,
     scrollBehavior: TopAppBarScrollBehavior,
+    trailing: (@Composable () -> Unit)? = null,
 ) {
     val state = scrollBehavior.state
     val density = LocalDensity.current
@@ -393,6 +462,18 @@ private fun CollapsingTopBar(
                     }
                 }
             }
+            // Действия — правый верхний угол, как в M3 top app bar: видны и свёрнуто, и развёрнуто.
+            if (trailing != null) {
+                Box(
+                    Modifier
+                        .align(Alignment.TopEnd)
+                        .height(CollapsedBarHeight)
+                        .padding(end = 8.dp),
+                    contentAlignment = Alignment.CenterEnd,
+                ) {
+                    trailing()
+                }
+            }
             Text(
                 title,
                 style = bigStyle,
@@ -423,6 +504,21 @@ private fun CollapsingTopBar(
 private val FadeThroughIn = fadeIn(tween(210, delayMillis = 90, easing = LinearOutSlowInEasing)) +
     scaleIn(tween(210, delayMillis = 90, easing = LinearOutSlowInEasing), initialScale = 0.96f)
 private val FadeThroughOut = fadeOut(tween(90, easing = FastOutLinearInEasing))
+
+/** Диаметр точки-индикатора на кнопке истории. */
+private val BellDotSize = 10.dp
+
+/**
+ * Сдвиг точки от центра кнопки так, чтобы она лежала на окружности: кнопка 48dp,
+ * радиус 24dp, на углу 45° это 24 · cos45° ≈ 17dp по каждой оси.
+ */
+private val BellDotOffset = 17.dp
+
+/** Появление/скрытие колокольчика — в ритме экранов: мягкий fade-through со сжатием. */
+private val BellIn = fadeIn(tween(210, delayMillis = 90, easing = LinearOutSlowInEasing)) +
+    scaleIn(tween(210, delayMillis = 90, easing = LinearOutSlowInEasing), initialScale = 0.8f)
+private val BellOut = fadeOut(tween(90, easing = FastOutLinearInEasing)) +
+    scaleOut(tween(90, easing = FastOutLinearInEasing), targetScale = 0.8f)
 
 private val CollapsedBarHeight = 64.dp
 private val ExpandedBarHeight = 120.dp

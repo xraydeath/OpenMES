@@ -29,7 +29,6 @@ import androidx.compose.material.icons.rounded.Celebration
 import androidx.compose.material.icons.rounded.Description
 import androidx.compose.material.icons.rounded.Extension
 import androidx.compose.material.icons.rounded.Map
-import androidx.compose.material.icons.rounded.Notifications
 import androidx.compose.material.icons.rounded.Person
 import androidx.compose.material.icons.rounded.QrCode2
 import androidx.compose.material.icons.rounded.Settings
@@ -78,7 +77,6 @@ private val upcomingServices = listOf(
     Service(Icons.Rounded.QrCode2, "Москвёнок", "QR-проход и идентификаторы"),
     Service(Icons.AutoMirrored.Rounded.Chat, "Чаты", "Сферум (VK/MAX)"),
     Service(Icons.Rounded.Description, "Справки", "Электронные справки"),
-    Service(Icons.Rounded.Notifications, "Уведомления", "Настройки пушей"),
     Service(Icons.Rounded.CalendarMonth, "Календарь", "События и мероприятия"),
     Service(Icons.Rounded.Map, "Карта", "Школы и кружки рядом"),
     Service(Icons.Rounded.Person, "Психолог", "Запись к специалисту"),
@@ -123,7 +121,7 @@ fun MoreScreen(
         Service(Icons.Rounded.WorkspacePremium, "Портфолио", "Олимпиады, конкурсы, награды и ГТО", onOpenPortfolio),
         Service(Icons.Rounded.Work, "Профориентация", "Тест, отрасли, дни открытых дверей", onOpenProforientation),
         Service(Icons.Rounded.Book, "Библиотека МЭШ", "Учебники и материалы", onOpenLibrary),
-        Service(Icons.Rounded.Settings, "Настройки", "Тема, PIN-код, уведомления", onOpenSettings),
+        Service(Icons.Rounded.Settings, "Настройки", "Тема, PIN-код, кэш, уведомления", onOpenSettings),
     )
 
     LazyColumn(

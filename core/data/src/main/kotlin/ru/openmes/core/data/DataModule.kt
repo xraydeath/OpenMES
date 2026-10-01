@@ -26,6 +26,8 @@ val dataModule: Module = module {
 
     single { OfflineCache(File(androidContext().filesDir, "offline_cache")) }
 
+    single { NotificationHistory(androidContext()) }
+
     single<SettingsRepository> { DataStoreSettingsRepository(androidContext()) }
 
     single<SessionRepository> {

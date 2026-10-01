@@ -381,7 +381,7 @@ fun markTone(value: String?): MarkTone {
         "5", "Зач", "Зачёт", "зачёт", "З", "зачтено" -> if (dark) MarkToneFiveDark else MarkToneFiveLight
         "4" -> if (dark) MarkToneFourDark else MarkToneFourLight
         "3" -> if (dark) MarkToneThreeDark else MarkToneThreeLight
-        "2", "1" -> if (dark) MarkToneTwoDark else MarkToneTwoLight
+        "2", "1", "Н", "н" -> if (dark) MarkToneTwoDark else MarkToneTwoLight
         null, "" -> MarkTone(
             MaterialTheme.colorScheme.surfaceContainerHighest,
             MaterialTheme.colorScheme.onSurfaceVariant,
