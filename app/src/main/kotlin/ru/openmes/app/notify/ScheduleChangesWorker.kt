@@ -13,6 +13,7 @@ import androidx.work.WorkerParameters
 import kotlinx.coroutines.flow.first
 import org.koin.core.component.KoinComponent
 import org.koin.core.component.inject
+import ru.openmes.app.R
 import ru.openmes.core.common.humanize
 import ru.openmes.core.common.runSuspendCatching
 import ru.openmes.core.data.DiaryRepository
@@ -57,7 +58,15 @@ class ScheduleChangesWorker(
         val key = "$KEY_PREFIX$childId"
         val previous = prefs.getString(key, null)?.lineSequence()?.mapNotNull(SlotSnapshot::decode)?.toList()
         val diff = previous?.let {
-            diffWindow(it, current, today, until, settings.scheduleChangesRooms, settings.scheduleChangesRooms)
+            diffWindow(
+                it,
+                current,
+                today,
+                until,
+                settings.scheduleChangesRooms,
+                settings.scheduleChangesRooms,
+                DiffTexts.of(applicationContext),
+            )
         }
         // Пустой ответ при непустом прошлом снимке — снимок не трогаем и молчим.
         if (previous != null && diff == null) return Result.success()
@@ -75,8 +84,20 @@ class ScheduleChangesWorker(
             val subject = dayChanges.mapNotNull { it.subject }.distinct().singleOrNull()
             val teacher = dayChanges.mapNotNull { it.teacher }.distinct().singleOrNull()
             val builder = Notifications.builder(applicationContext, Notifications.Channel.SCHEDULE)
-                .setContentTitle("Изменения в расписании: ${date.humanize().replaceFirstChar(Char::lowercase)}")
-                .setContentText(lines.first() + if (lines.size > 1) " и ещё ${lines.size - 1}" else "")
+                .setContentTitle(
+                    applicationContext.getString(
+                        R.string.notify_schedule_changes_title,
+                        date.humanize().replaceFirstChar(Char::lowercase),
+                    ),
+                )
+                .setContentText(
+                    lines.first() +
+                        if (lines.size > 1) {
+                            applicationContext.getString(R.string.notify_and_more, lines.size - 1)
+                        } else {
+                            ""
+                        },
+                )
                 .setStyle(NotificationCompat.BigTextStyle().bigText(lines.joinToString("\n")))
                 .setGroup(Notifications.Channel.SCHEDULE.id)
             Notifications.post(

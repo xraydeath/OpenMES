@@ -3,8 +3,7 @@
 package ru.openmes.core.designsystem.components
 
 import androidx.compose.ui.zIndex
-import androidx.compose.material3.LocalMinimumInteractiveComponentSize
-import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.material3.minimumInteractiveComponentSize
 import kotlin.math.roundToInt
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.layout.Layout
@@ -38,6 +37,7 @@ import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Refresh
@@ -73,10 +73,12 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import ru.openmes.core.designsystem.R
 import ru.openmes.core.designsystem.theme.LocalDarkTheme
 import ru.openmes.core.designsystem.theme.MarkTone
 import ru.openmes.core.designsystem.theme.MarkToneFiveDark
@@ -87,6 +89,7 @@ import ru.openmes.core.designsystem.theme.MarkToneThreeDark
 import ru.openmes.core.designsystem.theme.MarkToneThreeLight
 import ru.openmes.core.designsystem.theme.MarkToneTwoDark
 import ru.openmes.core.designsystem.theme.MarkToneTwoLight
+import ru.openmes.core.designsystem.theme.Spacing
 
 // ---------------------------------------------------------------------------
 // Карточки (M3 Expressive: тональные контейнеры + морфинг формы при нажатии)
@@ -126,7 +129,7 @@ fun MesCard(
     containerColor: Color = MaterialTheme.colorScheme.surfaceContainer,
     contentColor: Color = MaterialTheme.colorScheme.onSurface,
     shape: Shape? = null,
-    contentPadding: PaddingValues = PaddingValues(16.dp),
+    contentPadding: PaddingValues = PaddingValues(Spacing.l),
     content: @Composable ColumnScope.() -> Unit,
 ) {
     if (onClick != null) {
@@ -197,7 +200,7 @@ fun groupShape(
 }
 
 /** Зазор между элементами слитной группы. */
-val GroupGap = 2.dp
+val GroupGap = Spacing.xxs
 
 /**
  * Строка списка в expressive-стиле: иконка в фигурном контейнере,
@@ -221,9 +224,9 @@ fun MesListItem(
 ) {
     val content: @Composable () -> Unit = {
         Row(
-            modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
+            modifier = Modifier.padding(horizontal = Spacing.l, vertical = 14.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(16.dp),
+            horizontalArrangement = Arrangement.spacedBy(Spacing.l),
         ) {
             when {
                 leadingContent != null -> leadingContent()
@@ -299,7 +302,7 @@ fun StatusPill(
         Row(
             Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(4.dp),
+            horizontalArrangement = Arrangement.spacedBy(Spacing.xs),
         ) {
             if (icon != null) Icon(icon, contentDescription = null, modifier = Modifier.size(14.dp))
             Text(text, style = MaterialTheme.typography.labelMedium)
@@ -345,7 +348,7 @@ fun <T> ConnectedChoiceGroup(
                     index == options.lastIndex -> fixedToggleShapes(ConnectedTrailingShape)
                     else -> fixedToggleShapes(ConnectedMiddleShape)
                 },
-                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+                contentPadding = PaddingValues(horizontal = Spacing.m, vertical = Spacing.s),
             ) {
                 icon?.invoke(option)?.let {
                     Icon(it, contentDescription = null, modifier = Modifier.size(ToggleButtonDefaults.IconSize))
@@ -432,11 +435,12 @@ fun MarkBadge(
             )
         }
     }
-    WithMarkWeight(weight, modifier) { badgeModifier ->
+    WithMarkWeight(weight, modifier, visualSize = size) { badgeModifier ->
         if (onClick != null) {
-            // Без невидимой зоны касания 48 dp: иначе плашка веса ставилась бы от её края, а не от значка.
-            CompositionLocalProvider(LocalMinimumInteractiveComponentSize provides Dp.Unspecified) {
-                Surface(onClick = onClick, modifier = badgeModifier, shape = shape, color = tone.container, content = content)
+            // Значок — [size], зона касания — стандартные 48 dp. Видимая плашка не растёт,
+            // но палец попадает по ней уверенно.
+            Box(modifier = badgeModifier.minimumInteractiveComponentSize(), contentAlignment = Alignment.Center) {
+                Surface(onClick = onClick, modifier = Modifier.size(size), shape = shape, color = tone.container, content = content)
             }
         } else {
             Surface(modifier = badgeModifier, shape = shape, color = tone.container, content = content)
@@ -454,6 +458,9 @@ fun WithMarkWeight(
     weight: Int?,
     modifier: Modifier = Modifier,
     compact: Boolean = false,
+    // Размер видимого значка. Задан — плашка веса позиционируется по нему, а не по всей
+    // зоне касания: у кликабельных значков зона шире видимой плашки на 48 dp.
+    visualSize: Dp? = null,
     badge: @Composable (Modifier) -> Unit,
 ) {
     if (weight == null || weight <= 1) {
@@ -486,30 +493,49 @@ fun WithMarkWeight(
     ) { measurables, constraints ->
         val badgePlaceable = measurables[0].measure(constraints)
         val tag = measurables[1].measure(Constraints())
-        val inset = (badgePlaceable.width * 0.1f).roundToInt()
+        val visual = visualSize?.roundToPx() ?: badgePlaceable.width
+        val inset = (visual * 0.1f).roundToInt()
         layout(badgePlaceable.width, badgePlaceable.height) {
+            // Значок центрируется в зоне касания, плашка веса — от его видимого края.
+            val left = (badgePlaceable.width - visual) / 2
+            val top = (badgePlaceable.height - visual) / 2
             badgePlaceable.place(0, 0)
-            tag.place(badgePlaceable.width - inset - tag.width / 2, inset - tag.height / 2)
+            tag.place(left + visual - inset - tag.width / 2, top + inset - tag.height / 2)
         }
     }
 }
 
 // ---------------------------------------------------------------------------
+// Раскладка
+// ---------------------------------------------------------------------------
+
+/**
+ * Предельная ширина колонки контента. На телефоне не действует; на планшете и в
+ * альбомной ориентации удерживает текст читаемой длины, а нижнюю навигацию — по
+ * центру окна. По гайдлайнам MD3 для Large (1200 dp+) это 840…1040 dp.
+ */
+val MesContentMaxWidth = 840.dp
+
+// ---------------------------------------------------------------------------
 // Состояния экранов (LoadingIndicator, иконки в фигурах MaterialShapes)
 // ---------------------------------------------------------------------------
 
+/**
+ * Индикатор загрузки с подписью. [label] = null — подпись по умолчанию из ресурсов
+ * («Загрузка…»); передать свою строку можно только явно.
+ */
 @Composable
-fun LoadingState(modifier: Modifier = Modifier, label: String = "Загрузка…") {
+fun LoadingState(modifier: Modifier = Modifier, label: String? = null) {
     Column(
         modifier = modifier
             .fillMaxWidth()
             .padding(vertical = 64.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(16.dp),
+        verticalArrangement = Arrangement.spacedBy(Spacing.l),
     ) {
         LoadingIndicator(Modifier.size(64.dp))
         Text(
-            label,
+            label ?: stringResource(R.string.ds_loading),
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -540,10 +566,15 @@ fun EmptyState(
     )
 }
 
+/**
+ * Состояние ошибки. [title] и [subtitle] = null — дефолтные строки из ресурсов
+ * («Что-то пошло не так» / «Попробуйте ещё раз»), [details] — технический текст
+ * (например, сообщение сети) для плашки под кнопкой.
+ */
 @Composable
 fun ErrorState(
-    title: String = "Что-то пошло не так",
-    subtitle: String? = "Попробуйте ещё раз",
+    title: String? = null,
+    subtitle: String? = null,
     onRetry: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
     details: String? = null,
@@ -562,14 +593,14 @@ fun ErrorState(
                 }
             }
         },
-        title = title,
-        subtitle = subtitle,
+        title = title ?: stringResource(R.string.ds_error_title),
+        subtitle = subtitle ?: stringResource(R.string.ds_error_subtitle),
     ) {
         if (details != null) {
             Surface(
                 shape = MaterialTheme.shapes.medium,
                 color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                modifier = Modifier.padding(top = 4.dp),
+                modifier = Modifier.padding(top = Spacing.xs),
             ) {
                 Text(
                     details,
@@ -578,7 +609,7 @@ fun ErrorState(
                     textAlign = TextAlign.Center,
                     maxLines = 4,
                     overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                    modifier = Modifier.padding(horizontal = Spacing.m, vertical = Spacing.s),
                 )
             }
         }
@@ -586,11 +617,11 @@ fun ErrorState(
             Button(
                 onClick = onRetry,
                 shapes = ButtonDefaults.shapes(),
-                modifier = Modifier.padding(top = 8.dp),
+                modifier = Modifier.padding(top = Spacing.s),
             ) {
                 Icon(Icons.Rounded.Refresh, contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
                 androidx.compose.foundation.layout.Spacer(Modifier.size(ButtonDefaults.IconSpacing))
-                Text("Повторить")
+                Text(stringResource(R.string.ds_error_retry))
             }
         }
     }
@@ -607,16 +638,16 @@ private fun StateLayout(
     Column(
         modifier = modifier
             .fillMaxWidth()
-            .padding(horizontal = 32.dp, vertical = 56.dp),
+            .padding(horizontal = Spacing.xxl, vertical = 56.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(8.dp),
+        verticalArrangement = Arrangement.spacedBy(Spacing.s),
     ) {
         visual()
         Text(
             title,
             style = MaterialTheme.typography.titleLargeEmphasized,
             textAlign = TextAlign.Center,
-            modifier = Modifier.padding(top = 16.dp),
+            modifier = Modifier.padding(top = Spacing.l),
         )
         if (subtitle != null) {
             Text(
@@ -687,7 +718,8 @@ fun ScrollableFill(content: @Composable BoxScope.() -> Unit) {
             Modifier
                 .verticalScroll(rememberScrollState())
                 .fillMaxWidth()
-                .heightIn(min = maxHeight),
+                .heightIn(min = maxHeight)
+                .widthIn(max = MesContentMaxWidth),
             contentAlignment = Alignment.Center,
             content = content,
         )
@@ -708,7 +740,7 @@ fun SectionHeader(
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .padding(start = 4.dp, top = 12.dp, bottom = 4.dp),
+            .padding(start = Spacing.xs, top = Spacing.m, bottom = Spacing.xs),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.SpaceBetween,
     ) {

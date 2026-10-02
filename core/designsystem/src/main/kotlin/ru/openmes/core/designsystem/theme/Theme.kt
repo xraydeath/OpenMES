@@ -10,6 +10,8 @@ import androidx.compose.material3.dynamicDarkColorScheme
 import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 
 /**
@@ -41,6 +43,10 @@ fun OpenMESTheme(
 
     CompositionLocalProvider(
         LocalDarkTheme provides darkTheme,
+        // Подложка экрана — та же, чем залит сам экран. Читается градиентами растворения
+        // у кромок: заливать их надо ровно тем же, чем залит сам экран, иначе стык будет
+        // видно.
+        LocalMesBackdrop provides colorScheme.background,
         // Без «растяжения» списков у края (stretch overscroll Android 12+) — выглядит как подёргивание.
         LocalOverscrollFactory provides null,
     ) {
@@ -70,3 +76,14 @@ fun OpenMESAppTheme(
         OpenMESTheme(darkTheme = darkTheme, dynamicColor = dynamicColor, content = content)
     }
 }
+
+/**
+ * Цвет подложки экрана: то, чем залит сам экран. Берётся в градиентах растворения у кромок,
+ * где нужен именно цвет экрана, а не цвет палитры. Вне темы локаль возвращает
+ * [Color.Unspecified], и тогда читатель подставляет `colorScheme.background` сам.
+ */
+val LocalMesBackdrop = staticCompositionLocalOf<Color> { Color.Unspecified }
+
+@Composable
+internal fun backdropOr(background: Color): Color =
+    LocalMesBackdrop.current.takeIf { it != Color.Unspecified } ?: background

@@ -1,0 +1,342 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Строки раздела «Ещё»: строки фича-модуля, общие состояния (Загрузка/Ошибка/Повторить)
+         лежат в :core:designsystem и не дублируются здесь. -->
+
+    <!-- Общие действия этого модуля -->
+    <string name="more_action_save">Сохранить</string>
+    <string name="more_action_cancel">Отмена</string>
+    <string name="more_action_clear">Очистить</string>
+
+    <!-- Экран «Ещё»: профиль, список разделов, подвал -->
+    <string name="more_profile_disclaimer">OpenMES — неофициальный открытый клиент.</string>
+    <string name="more_avatar_cd">Аватар</string>
+    <string name="more_profile_mosru">Профиль mos.ru</string>
+    <string name="more_logout">Выйти</string>
+    <string name="more_child_section">Профиль ученика</string>
+    <string name="more_sections_header">Разделы</string>
+    <string name="more_service_attendance">Посещаемость</string>
+    <string name="more_service_attendance_sub">Пропуски с начала учебного года</string>
+    <string name="more_service_visits">Проходы</string>
+    <string name="more_service_visits_sub">Турникеты: приход, уход, время в колледже</string>
+    <string name="more_service_card">Студенческий билет</string>
+    <string name="more_service_card_sub">Электронный билет колледжа</string>
+    <string name="more_service_food">Питание</string>
+    <string name="more_service_food_sub">Меню, баланс и операции по счёту</string>
+    <string name="more_service_news">Новости</string>
+    <string name="more_service_news_sub">Лента school.mos.ru</string>
+    <string name="more_service_school">О колледже</string>
+    <string name="more_service_school_sub">Контакты, кураторы, корпуса</string>
+    <string name="more_service_portfolio">Портфолио</string>
+    <string name="more_service_portfolio_sub">Олимпиады, конкурсы, награды и ГТО</string>
+    <string name="more_service_prof">Профориентация</string>
+    <string name="more_service_prof_sub">Тест, отрасли, дни открытых дверей</string>
+    <string name="more_service_library">Библиотека МЭШ</string>
+    <string name="more_service_library_sub">Учебники и материалы</string>
+    <string name="more_service_settings">Настройки</string>
+    <string name="more_service_settings_sub">Тема, PIN-код, кэш, уведомления</string>
+
+    <!-- Посещаемость -->
+    <string name="more_attendance_empty_title">Пропусков нет</string>
+    <string name="more_attendance_empty_sub">С начала учебного года не отмечено ни одного пропуска</string>
+    <string name="more_attendance_year">С начала учебного года</string>
+    <string name="more_attendance_filter_all">Все</string>
+    <string name="more_attendance_filter_excused">Уважительные</string>
+    <string name="more_attendance_filter_none">Без причины</string>
+    <string name="more_attendance_stat_skipped">%1$s\nпропущено</string>
+    <string name="more_attendance_stat_no_reason">без\nпричины</string>
+    <string name="more_attendance_medical_header">Справки ЕМИАС</string>
+    <string name="more_attendance_collapse">Свернуть</string>
+    <string name="more_attendance_show_all">Показать все (%1$d)</string>
+    <string name="more_attendance_health_sick">Болеет</string>
+    <string name="more_attendance_health_infection">Инфекционное заболевание</string>
+    <string name="more_attendance_health_exempt">Освобождение</string>
+    <string name="more_attendance_exempt_partial">Освобождение от части предметов</string>
+
+    <!-- Проходы -->
+    <string name="more_visits_empty_title">Проходов нет</string>
+    <string name="more_visits_empty_sub">За этот период турникеты не отмечали входов</string>
+    <string name="more_visits_load_more">Показать ещё 4 недели</string>
+    <string name="more_visits_period">С %1$s по сегодня</string>
+    <string name="more_visits_stat_days">дней\nв колледже</string>
+    <string name="more_visits_stat_average">в среднем\nза день</string>
+    <string name="more_visits_stat_arrival">средний\nприход</string>
+    <string name="more_visits_no_mark_in">нет отметки входа</string>
+    <string name="more_visits_no_mark_out">нет отметки выхода</string>
+    <string name="more_visits_duration">%1$d ч %2$d мин</string>
+
+    <!-- Студенческий билет -->
+    <string name="more_card_unavailable">Студенческий билет недоступен</string>
+    <string name="more_card_unavailable_sub">Возможно, колледж ещё не выпустил электронческий билет</string>
+    <string name="more_card_heading">СТУДЕНЧЕСКИЙ БИЛЕТ</string>
+    <string name="more_card_number">№ %1$s</string>
+    <string name="more_card_details">Сведения</string>
+    <string name="more_card_issue_date">Дата выдачи</string>
+    <string name="more_card_valid_until">Действителен до</string>
+    <string name="more_card_education_form">Форма обучения</string>
+    <string name="more_card_course">Курс</string>
+    <string name="more_card_education_level">Уровень образования</string>
+    <string name="more_card_specialty">Специальность</string>
+    <string name="more_card_enrollment_order">Приказ о зачислении</string>
+    <string name="more_card_founder">Учредитель</string>
+    <string name="more_card_qr_cd">QR-код студенческого билета</string>
+    <string name="more_card_qr_hint">Покажите QR-код на входе</string>
+
+    <!-- Питание -->
+    <string name="more_food_tab_canteen">Столовая</string>
+    <string name="more_food_tab_buffet">Буфет</string>
+    <string name="more_food_tab_account">Счёт</string>
+    <string name="more_food_empty_title">Меню нет</string>
+    <string name="more_food_empty_sub">На этот день комплексы не опубликованы</string>
+    <string name="more_food_buffet_empty">Ассортимент не опубликован</string>
+    <string name="more_food_buffet_hours">Буфет работает %1$s</string>
+    <string name="more_food_buffet_missing">Буфет на этот день не найден</string>
+    <string name="more_food_category_other">Прочее</string>
+    <string name="more_food_account_title">Лицевой счёт</string>
+    <string name="more_food_account_number">№ %1$s</string>
+    <string name="more_food_day_limit">Дневной лимит трат</string>
+    <string name="more_food_warn_below">Предупреждать при остатке ниже</string>
+    <string name="more_food_not_set_masc">не задан</string>
+    <string name="more_food_not_set_fem">не задано</string>
+    <string name="more_food_top_up">Пополнить на newpay.mos.ru</string>
+    <string name="more_food_ops_header">Операции за %1$d дней</string>
+    <string name="more_food_ops_empty">Покупок пока не было</string>
+    <string name="more_food_ops_empty_sub">Операций по счёту за этот период нет</string>
+    <string name="more_food_ops_failed">Не удалось загрузить операции</string>
+    <string name="more_food_ops_loading">Загружаем операции…</string>
+    <string name="more_food_tx_default">Операция</string>
+    <string name="more_food_provider">Питание: %1$s</string>
+    <string name="more_food_balance">Баланс %1$s</string>
+    <string name="more_food_buffet_pill">Буфет %1$s</string>
+    <string name="more_food_tag_preferential">льготное</string>
+    <string name="more_food_tag_paid">платное</string>
+    <string name="more_food_tag_preorder">предзаказ</string>
+    <string name="more_food_weight">%1$s г</string>
+    <string name="more_food_calories">%1$d ккал</string>
+    <string name="more_food_bju_protein">Б %1$d</string>
+    <string name="more_food_bju_fat">Ж %1$d</string>
+    <string name="more_food_bju_carbs">У %1$d</string>
+    <string name="more_food_prev_week_cd">Предыдущая неделя</string>
+    <string name="more_food_next_week_cd">Следующая неделя</string>
+
+    <!-- Новости -->
+    <string name="more_news_error">Не удалось загрузить новости</string>
+    <string name="more_news_empty">Новостей пока нет</string>
+    <string name="more_news_detail_error">Не удалось открыть новость</string>
+    <string name="more_news_video">Видео</string>
+    <string name="more_news_video_open">Открыть в браузере</string>
+
+    <!-- О колледже -->
+    <string name="more_school_error">Сведения о колледже недоступны</string>
+    <string name="more_school_principal">Директор</string>
+    <string name="more_school_curator">Куратор группы</string>
+    <string name="more_school_address">Адрес</string>
+    <string name="more_school_phone">Телефон</string>
+    <string name="more_school_email">Почта</string>
+    <string name="more_school_site">Сайт</string>
+    <string name="more_school_people">Люди</string>
+    <string name="more_school_contacts">Контакты</string>
+    <string name="more_school_branches">Корпуса · %1$d</string>
+    <string name="more_school_branch_mine">мой</string>
+    <string name="more_school_branch_main">главный</string>
+
+    <!-- Профориентация -->
+    <string name="more_prof_error">Профориентация недоступна</string>
+    <string name="more_prof_empty">Результатов пока нет</string>
+    <string name="more_prof_empty_sub">Пройдите профориентационное тестирование</string>
+    <string name="more_prof_title">Профориентация</string>
+    <string name="more_prof_test_passed">Тест пройден %1$s</string>
+    <string name="more_prof_test_not_passed">Тест ещё не пройден</string>
+    <string name="more_prof_industries">Подходящие отрасли: %1$s</string>
+    <string name="more_prof_report">Отчёт о тестировании</string>
+    <string name="more_prof_details">Подробные результаты</string>
+    <string name="more_prof_results">Результаты</string>
+    <string name="more_prof_recommended">Рекомендованные отрасли</string>
+    <string name="more_prof_atlas_cd">Атлас колледжей</string>
+    <string name="more_prof_specialties">Специальности</string>
+    <string name="more_prof_colleges">Колледжи</string>
+    <string name="more_prof_events_upcoming">Записи на мероприятия</string>
+    <string name="more_prof_events_history">История мероприятий</string>
+    <string name="more_prof_event_visited">был</string>
+
+    <!-- Портфолио -->
+    <string name="more_portfolio_error">Портфолио недоступно</string>
+    <string name="more_portfolio_empty">Портфолио пока пустое</string>
+    <string name="more_portfolio_empty_sub">Здесь появятся олимпиады, конкурсы и награды</string>
+    <string name="more_portfolio_title">Портфолио</string>
+    <string name="more_portfolio_rewards">Награды</string>
+    <string name="more_portfolio_year">%1$s учебный год</string>
+    <string name="more_portfolio_no_date">Без даты</string>
+    <string name="more_portfolio_valid_until">действует до %1$s</string>
+    <string name="more_portfolio_number">№ %1$s</string>
+    <string name="more_portfolio_score_of"> из %1$s</string>
+
+    <!-- Настройки -->
+    <string name="more_settings_appearance">Оформление</string>
+    <string name="more_settings_theme">Тема</string>
+    <string name="more_settings_theme_system">Система</string>
+    <string name="more_settings_theme_light">Светлая</string>
+    <string name="more_settings_theme_dark">Тёмная</string>
+    <string name="more_settings_dynamic_color">Динамический цвет</string>
+    <string name="more_settings_dynamic_color_sub">Material You: палитра из обоев (Android 12+)</string>
+    <string name="more_settings_security">Безопасность</string>
+    <string name="more_settings_pin">PIN-код</string>
+    <string name="more_settings_pin_sub">При запуске и после минуты в фоне</string>
+    <string name="more_settings_biometric">Биометрия</string>
+    <string name="more_settings_biometric_sub">Разблокировка отпечатком или лицом</string>
+    <string name="more_settings_change_pin">Сменить PIN-код</string>
+    <string name="more_settings_data">Данные</string>
+    <string name="more_settings_cache">Кэш и офлайн</string>
+    <string name="more_settings_cache_on">Включён · разделы и период данных</string>
+    <string name="more_settings_cache_off">Выключен</string>
+    <string name="more_settings_about">О приложении</string>
+    <string name="more_settings_app_name" translatable="false">OpenMES</string>
+    <string name="more_settings_version">Версия %1$s</string>
+    <string name="more_settings_about_text">Открытый клиент «Колледжа МЭШ» на Material Design 3 Expressive.\nДанные получаются только с ваших аккаунтов через официальные API school.mos.ru.</string>
+    <string name="more_settings_about_disclaimer">Не является официальным приложением Департамента образования и науки города Москвы.</string>
+
+    <!-- Диалог PIN-кода -->
+    <string name="more_settings_pin_dialog_title">PIN-код</string>
+    <string name="more_settings_pin_new">Новый PIN (4–8 цифр)</string>
+    <string name="more_settings_pin_repeat">Повторите PIN</string>
+    <string name="more_settings_pin_mismatch">PIN-коды не совпадают</string>
+
+    <!-- Кэш и офлайн -->
+    <string name="more_cache_clear_title">Очистить кэш?</string>
+    <string name="more_cache_clear_text">Сохранённые данные удалятся — без сети экраны будут пустыми, пока не загрузятся заново.</string>
+    <string name="more_cache_enabled">Кэширование</string>
+    <string name="more_cache_enabled_sub">Показывать сохранённое сразу и без сети</string>
+    <string name="more_cache_background">Обновлять в фоне</string>
+    <string name="more_cache_background_sub">Примерно раз в час при наличии сети</string>
+    <string name="more_cache_records">Записей: %1$d</string>
+    <string name="more_cache_counting">Считаем…</string>
+    <string name="more_cache_section">Офлайн-кэш</string>
+    <string name="more_cache_what">Что сохранять</string>
+    <string name="more_cache_period">Период данных</string>
+    <string name="more_cache_period_desc">Расписание, оценки, ДЗ, проходы и контрольные сохраняются, только если попадают в этот период от сегодняшнего дня</string>
+    <string name="more_cache_period_2w">±2 нед.</string>
+    <string name="more_cache_period_month">±месяц</string>
+    <string name="more_cache_period_3m">±3 мес.</string>
+    <string name="more_cache_period_all">Всё</string>
+    <string name="more_cache_profile_note">Профиль для входа сохраняется всегда: без него при запуске без сети придётся входить заново.</string>
+    <!-- Разделы офлайн-кэша: [more_cache_sec_*] подписывают переключатели -->
+    <string name="more_cache_sec_schedule">Расписание</string>
+    <string name="more_cache_sec_schedule_sub">Уроки и их подробности; без него виджет работает только с сетью</string>
+    <string name="more_cache_sec_calendar">Календарь</string>
+    <string name="more_cache_sec_calendar_sub">Каникулы, выходные и переносы рабочих дней</string>
+    <string name="more_cache_sec_plan">Темы и контрольные</string>
+    <string name="more_cache_sec_plan_sub">Модули и темы уроков, отметки контрольных</string>
+    <string name="more_cache_sec_marks">Оценки</string>
+    <string name="more_cache_sec_marks_sub">Текущие, итоговые, годовые и аттестация</string>
+    <string name="more_cache_sec_homework">Домашние задания</string>
+    <string name="more_cache_sec_attendance">Посещаемость</string>
+    <string name="more_cache_sec_attendance_sub">Пропуски, опоздания и справки ЕМИАС</string>
+    <string name="more_cache_sec_visits">Проходы</string>
+    <string name="more_cache_sec_visits_sub">Входы и выходы через турникеты</string>
+    <string name="more_cache_sec_food">Питание</string>
+    <string name="more_cache_sec_food_sub">Меню, баланс и операции по счёту</string>
+    <string name="more_cache_sec_news">Новости</string>
+    <string name="more_cache_sec_portfolio">Портфолио</string>
+    <string name="more_cache_sec_portfolio_sub">Олимпиады, конкурсы и награды</string>
+    <string name="more_cache_sec_profile">Студбилет, колледж, профориентация</string>
+    <string name="more_cache_sec_session">Профиль для входа</string>
+
+    <!-- Уведомления: настройки -->
+    <string name="more_notif_section">Уведомления</string>
+    <string name="more_notif_short_marks">оценки</string>
+    <string name="more_notif_short_lessons">пары</string>
+    <string name="more_notif_short_schedule">расписание</string>
+    <string name="more_notif_short_homework">ДЗ</string>
+    <string name="more_notif_short_homework_changes">новые ДЗ</string>
+    <string name="more_notif_short_tests">контрольные</string>
+    <string name="more_notif_all_off">Выключены</string>
+    <string name="more_notif_checking_evening">Проверяем ДЗ и контрольные на завтра…</string>
+    <string name="more_notif_allow_hint">Разрешите уведомления для OpenMES в настройках</string>
+    <string name="more_notif_schedule_changes">Изменения в расписании</string>
+    <string name="more_notif_schedule_changes_sub">Отмена, замена и перенос пар, новые пары; проверка примерно раз в 30 минут</string>
+    <string name="more_notif_watch_changes">Следить за изменениями</string>
+    <string name="more_notif_horizon_2d">2 дня</string>
+    <string name="more_notif_horizon_3d">3 дня</string>
+    <string name="more_notif_horizon_week">Неделя</string>
+    <string name="more_notif_horizon_2w">2 нед.</string>
+    <string name="more_notif_room_teacher">Кабинет и преподаватель</string>
+    <string name="more_notif_room_teacher_sub">Сообщать и о смене кабинета или преподавателя</string>
+    <string name="more_notif_marks">Новые оценки</string>
+    <string name="more_notif_marks_sub">Проверять дневник в фоне примерно раз в час</string>
+    <string name="more_notif_hide_marks">Скрывать значение оценки</string>
+    <string name="more_notif_homework_changes">Новые и изменённые задания</string>
+    <string name="more_notif_homework_changes_sub">Тот же фоновый опрос дневника: сообщать о новых заданиях и правках их текста</string>
+    <string name="more_notif_hide_marks_sub">В уведомлении будет только предмет</string>
+    <string name="more_notif_lesson">Перед парой</string>
+    <string name="more_notif_lesson_sub">Предмет, время и кабинет; у дистанционной — кнопка «Подключиться»</string>
+    <string name="more_notif_minutes_label">За сколько минут</string>
+    <string name="more_notif_minutes_value">%1$d мин</string>
+    <string name="more_notif_distance_only">Только дистанционные</string>
+    <string name="more_notif_distance_only_sub">Не напоминать об очных парах</string>
+    <string name="more_notif_exact_time">Разрешить точное время</string>
+    <string name="more_notif_exact_time_sub">Без этого Android может прислать напоминание на несколько минут позже</string>
+    <string name="more_notif_show_example">Показать пример</string>
+    <string name="more_notif_show_example_sub">Как будет выглядеть напоминание</string>
+    <string name="more_notif_homework_tomorrow">Несделанное ДЗ на завтра</string>
+    <string name="more_notif_homework_tomorrow_sub">Список заданий, не отмеченных выполненными</string>
+    <string name="more_notif_tests_tomorrow">Контрольные завтра</string>
+    <string name="more_notif_tests_tomorrow_sub">Контрольные, зачёты и проверочные по расписанию</string>
+    <string name="more_notif_hour_label">Во сколько напоминать</string>
+    <string name="more_notif_hour_value">%1$d:00</string>
+    <string name="more_notif_check_now">Проверить сейчас</string>
+    <string name="more_notif_check_now_sub">Уведомление придёт, если на завтра что-то есть</string>
+    <string name="more_notif_denied">Уведомления запрещены</string>
+    <string name="more_notif_denied_sub">Разрешите их в настройках Android, иначе они не будут показываться</string>
+    <string name="more_notif_group_marks">Дневник</string>
+    <string name="more_notif_group_lessons">Пары</string>
+    <string name="more_notif_group_schedule">Расписание</string>
+    <string name="more_notif_group_evening">Вечером накануне</string>
+    <string name="more_notif_group_check">Проверка</string>
+    <string name="more_notif_footer">Напоминания о парах берутся из сохранённого расписания — оно обновляется в фоне и при открытии приложения. Экономия заряда на некоторых телефонах может задерживать уведомления: если они опаздывают, отключите её для OpenMES.</string>
+    <!-- Примеры уведомлений в настройках -->
+    <string name="more_notif_test_new_mark">Новая оценка</string>
+    <string name="more_notif_test_new_mark_sub">Математика · оценка 5 (вес 2) · за сегодня</string>
+    <string name="more_notif_test_mark_changed">Изменение оценки</string>
+    <string name="more_notif_test_mark_changed_sub">Математика · оценка изменена: 4 → 5 · за сегодня</string>
+    <string name="more_notif_test_new_hw">Новое ДЗ</string>
+    <string name="more_notif_test_new_hw_sub">Информатика · новое задание: §12, задачи 1–5 · на завтра</string>
+    <string name="more_notif_test_hw_changed">Изменение ДЗ</string>
+    <string name="more_notif_test_hw_changed_sub">Информатика · задание изменилось: §12, задачи 1–12 · на завтра</string>
+    <string name="more_notif_test_schedule">Изменение расписания</string>
+    <string name="more_notif_test_schedule_sub">Математика перенесена на 2-ю пару, кабинет 214 · завтра</string>
+
+    <!-- История уведомлений -->
+    <string name="more_history_empty">Уведомлений пока не было</string>
+    <string name="more_history_empty_sub">Здесь появятся оценки, домашние задания, напоминания о парах и изменения расписания</string>
+    <string name="more_history_clear">Очистить историю</string>
+    <string name="more_history_default_title">Уведомление</string>
+    <string name="more_history_day">День</string>
+    <string name="more_history_teacher">Преподаватель</string>
+    <string name="more_history_mark">Оценка</string>
+    <string name="more_history_received">Получено %1$s, %2$s</string>
+
+    <!-- Консоль API -->
+    <string name="more_api_disclaimer">Запросы идут от вашего аккаунта. В ответах могут быть личные данные — перед отправкой кому-либо просмотрите их.</string>
+    <string name="more_api_path_label">Путь от school.mos.ru/</string>
+    <string name="more_api_path_hint">«!» в начале — без роутинга колледжа. {personGuid} {studentId} {profileId} {contractId} {today} {monday} {sunday} {monthAgo}</string>
+    <string name="more_api_send">Отправить</string>
+    <string name="more_api_probe_button">Разведка (%1$d)</string>
+    <string name="more_api_probe_progress">Разведка: %1$d из %2$d</string>
+    <string name="more_api_response">Ответ</string>
+    <string name="more_api_response_status">%1$d · %2$d мс</string>
+    <string name="more_api_copy">Копировать</string>
+    <string name="more_api_share">Поделиться</string>
+    <string name="more_api_share_title">Ответ API</string>
+    <string name="more_api_empty_body">(пустое тело)</string>
+    <string name="more_api_truncated">…показано %1$d тыс. из %2$d тыс. символов — целиком через «Поделиться»</string>
+    <string name="more_api_too_big">Ответ слишком большой — используйте «Поделиться»</string>
+    <!-- Готовые запросы: подписи к чипам -->
+    <string name="more_api_preset_food_transactions">Транзакции питания</string>
+    <string name="more_api_preset_expense_limits">Лимиты трат</string>
+    <string name="more_api_preset_balance">Баланс</string>
+    <string name="more_api_preset_payments">История платежей</string>
+    <string name="more_api_preset_contracts">Договоры</string>
+    <string name="more_api_preset_debts">Долги</string>
+    <string name="more_api_preset_final_marks">Итоговые оценки</string>
+    <string name="more_api_preset_rating">Рейтинг</string>
+</resources>

@@ -24,7 +24,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Shape
-import androidx.compose.ui.unit.dp
+import androidx.compose.ui.res.stringResource
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
@@ -51,6 +51,7 @@ import ru.openmes.core.designsystem.components.SectionHeader
 import ru.openmes.core.designsystem.components.StatValue
 import ru.openmes.core.designsystem.components.StatusPill
 import ru.openmes.core.designsystem.components.groupShape
+import ru.openmes.core.designsystem.theme.Spacing
 import ru.openmes.core.model.Portfolio
 import ru.openmes.core.model.PortfolioEvent
 import ru.openmes.core.model.PortfolioReward
@@ -114,14 +115,18 @@ fun PortfolioScreen(viewModel: PortfolioViewModel) {
         when {
             state.loading && data == null -> LoadingState()
             data == null -> ScrollableFill {
-                ErrorState(title = "Портфолио недоступно", onRetry = viewModel::refresh, details = state.error)
+                ErrorState(
+                    title = stringResource(R.string.more_portfolio_error),
+                    onRetry = viewModel::refresh,
+                    details = state.error,
+                )
             }
 
             data.events.isEmpty() && data.rewards.isEmpty() -> ScrollableFill {
                 EmptyState(
                     icon = Icons.Rounded.EmojiEvents,
-                    title = "Портфолио пока пустое",
-                    subtitle = "Здесь появятся олимпиады, конкурсы и награды",
+                    title = stringResource(R.string.more_portfolio_empty),
+                    subtitle = stringResource(R.string.more_portfolio_empty_sub),
                 )
             }
 
@@ -131,12 +136,12 @@ fun PortfolioScreen(viewModel: PortfolioViewModel) {
                 }
                 LazyColumn(
                     modifier = Modifier.fillMaxSize(),
-                    contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 24.dp),
+                    contentPadding = PaddingValues(start = Spacing.l, end = Spacing.l, top = Spacing.s, bottom = Spacing.xl),
                     verticalArrangement = Arrangement.spacedBy(GroupGap),
                 ) {
                     item { PortfolioHero(data) }
                     if (data.rewards.isNotEmpty()) {
-                        item { SectionHeader("Награды", Modifier.padding(top = 12.dp)) }
+                        item { SectionHeader(stringResource(R.string.more_portfolio_rewards), Modifier.padding(top = Spacing.m)) }
                         itemsIndexed(data.rewards) { index, reward ->
                             RewardItem(reward, groupShape(index, data.rewards.size))
                         }
@@ -144,8 +149,9 @@ fun PortfolioScreen(viewModel: PortfolioViewModel) {
                     eventsByYear.forEach { (year, events) ->
                         item(key = "year_$year") {
                             SectionHeader(
-                                year?.let { "$it учебный год" } ?: "Без даты",
-                                Modifier.padding(top = 12.dp),
+                                year?.let { stringResource(R.string.more_portfolio_year, it) }
+                                    ?: stringResource(R.string.more_portfolio_no_date),
+                                Modifier.padding(top = Spacing.m),
                                 trailing = {
                                     Text(
                                         "${events.size} ${pluralRu(events.size, "мероприятие", "мероприятия", "мероприятий")}",
@@ -169,11 +175,11 @@ fun PortfolioScreen(viewModel: PortfolioViewModel) {
 private fun PortfolioHero(data: Portfolio) {
     val prizes = data.events.count { it.reward.isPrize() }
     HeroCard {
-        Text("Портфолио", style = MaterialTheme.typography.titleLargeEmphasized)
+        Text(stringResource(R.string.more_portfolio_title), style = MaterialTheme.typography.titleLargeEmphasized)
         Row(
             Modifier
                 .fillMaxWidth()
-                .padding(top = 16.dp),
+                .padding(top = Spacing.l),
             horizontalArrangement = Arrangement.SpaceAround,
         ) {
             StatValue(
@@ -199,14 +205,18 @@ private fun RewardItem(reward: PortfolioReward, shape: Shape) {
             reward.source,
             reward.details,
             reward.date?.toRuDate(includeYear = true),
-            reward.expireDate?.let { "действует до ${it.toRuDate(includeYear = true)}" },
+            reward.expireDate?.let {
+                stringResource(R.string.more_portfolio_valid_until, it.toRuDate(includeYear = true))
+            },
         ).joinToString(" · ").ifEmpty { null },
         icon = if (reward.sport) Icons.Rounded.SportsGymnastics else Icons.Rounded.MilitaryTech,
         iconShape = MaterialShapes.Sunny.toShape(),
         iconContainerColor = MaterialTheme.colorScheme.tertiaryContainer,
         iconContentColor = MaterialTheme.colorScheme.onTertiaryContainer,
         shape = shape,
-        trailingContent = reward.number?.let { number -> { StatusPill("№ $number") } },
+        trailingContent = reward.number?.let { number ->
+            { StatusPill(stringResource(R.string.more_portfolio_number, number)) }
+        },
     )
 }
 
@@ -223,10 +233,13 @@ private fun EventItem(event: PortfolioEvent, shape: Shape) {
         shape = shape,
         trailingContent = if (event.score == null && event.reward == null) null else {
             {
-                Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(Spacing.xs)) {
                     event.score?.let { score ->
                         StatusPill(
-                            score.formatScore() + (event.maxScore?.let { " из ${it.formatScore()}" } ?: ""),
+                            score.formatScore() +
+                                (event.maxScore?.let {
+                                    stringResource(R.string.more_portfolio_score_of, it.formatScore())
+                                } ?: ""),
                             containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
                             contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
                         )

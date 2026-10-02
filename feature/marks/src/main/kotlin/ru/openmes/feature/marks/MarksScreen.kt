@@ -1,5 +1,6 @@
 package ru.openmes.feature.marks
 
+import androidx.annotation.StringRes
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.Crossfade
 import androidx.compose.animation.core.animateFloatAsState
@@ -58,10 +59,10 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.ToggleButton
 import androidx.compose.material3.ToggleButtonDefaults
 import androidx.compose.material3.rememberModalBottomSheetState
+import androidx.compose.material3.SnackbarDuration
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.platform.LocalContext
-import android.widget.Toast
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -71,6 +72,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
@@ -105,6 +107,8 @@ import ru.openmes.core.designsystem.components.EmptyState
 import ru.openmes.core.designsystem.components.ErrorState
 import ru.openmes.core.designsystem.components.GroupGap
 import ru.openmes.core.designsystem.components.LoadingState
+import ru.openmes.core.designsystem.components.mesDockReservedHeight
+import ru.openmes.core.designsystem.components.mesFadeTop
 import ru.openmes.core.designsystem.components.MarkBadge
 import ru.openmes.core.designsystem.components.MesCard
 import ru.openmes.core.designsystem.components.MesListItem
@@ -115,6 +119,8 @@ import ru.openmes.core.designsystem.components.StatusPill
 import ru.openmes.core.designsystem.components.groupShape
 import ru.openmes.core.designsystem.components.markShape
 import ru.openmes.core.designsystem.components.markTone
+import ru.openmes.core.designsystem.components.mesSnackbar
+import ru.openmes.core.designsystem.theme.Spacing
 import ru.openmes.core.model.FinalMarksYear
 import ru.openmes.core.model.GradeBook
 import ru.openmes.core.model.Mark
@@ -126,6 +132,7 @@ import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import kotlin.math.roundToInt
 import ru.openmes.core.model.RoundingRules
+import ru.openmes.feature.marks.R
 
 // ---------------------------------------------------------------------------
 // ViewModel
@@ -146,9 +153,13 @@ class MarksViewModel(
         /** Зачётная книжка. */
         val gradeBook: GradeBook? = null,
         /** Зачётку загрузить не удалось (а сохранённой нет) — вместо вечной загрузки показываем ошибку. */
+        val gradeBookFailed: Boolean = false,
+        /** Текст ошибки зачётки от сервера (может отсутствовать — тогда покажем один заголовок). */
         val gradeBookError: String? = null,
         /** Годовые оценки по учебным годам (портфолио); null — ещё грузятся. */
         val finalMarks: List<FinalMarksYear>? = null,
+        /** Годовые оценки загрузить не удалось — вместо вечной загрузки показываем ошибку. */
+        val finalMarksFailed: Boolean = false,
         val finalMarksError: String? = null,
         val loading: Boolean = true,
         /** Обновление по свайпу (фоновое — после показа кэша — без индикатора). */
@@ -181,8 +192,11 @@ class MarksViewModel(
     private val _state = MutableStateFlow(MarksUiState())
     val state = _state.asStateFlow()
 
+    /** Одноразовое сообщение снапбара: ресурс строки и, если есть, детали ошибки. */
+    data class MarksMessage(@StringRes val textRes: Int, val detail: String? = null)
+
     /** Одноразовые сообщения: не удалось обновить, хотя на экране уже есть данные. */
-    private val _messages = Channel<String>(Channel.BUFFERED)
+    private val _messages = Channel<MarksMessage>(Channel.BUFFERED)
     val messages = _messages.receiveAsFlow()
 
     /** Ребёнок, чьи оценки сейчас в состоянии: сменили ребёнка — всё чужое сбрасываем. */
@@ -248,19 +262,19 @@ class MarksViewModel(
                 _state.value = _state.value.copy(loading = false, refreshing = false, error = e.message)
                 // С данными на экране полноэкранной ошибки нет — сообщаем отдельно, чтобы сбой не был тихим.
                 if (_state.value.subjects.isNotEmpty()) {
-                    _messages.send("Не удалось обновить оценки" + (e.message?.let { ": $it" } ?: ""))
+                    _messages.send(MarksMessage(R.string.marks_refresh_failed, e.message))
                 }
             }
             // Зачётка грузится лениво и не блокирует основной список.
-            _state.value = _state.value.copy(gradeBookError = null)
+            _state.value = _state.value.copy(gradeBookFailed = false, gradeBookError = null)
             runSuspendCatching { diaryRepository.getGradeBook(childId) }
                 .onSuccess { gb -> _state.value = _state.value.copy(gradeBook = gb) }
-                .onFailure { e -> _state.value = _state.value.copy(gradeBookError = e.message ?: "Не удалось загрузить зачётку") }
+                .onFailure { e -> _state.value = _state.value.copy(gradeBookFailed = true, gradeBookError = e.message) }
             // Годовые оценки меняются раз в год: обновляются только по свайпу.
-            _state.value = _state.value.copy(finalMarksError = null)
+            _state.value = _state.value.copy(finalMarksFailed = false, finalMarksError = null)
             runSuspendCatching { collegeRepository.getFinalMarks(force = userInitiated) }
                 .onSuccess { years -> _state.value = _state.value.copy(finalMarks = years) }
-                .onFailure { e -> _state.value = _state.value.copy(finalMarksError = e.message ?: "Не удалось загрузить годовые оценки") }
+                .onFailure { e -> _state.value = _state.value.copy(finalMarksFailed = true, finalMarksError = e.message) }
         }
     }
 
@@ -307,17 +321,17 @@ class MarksViewModel(
 // Экран: «По дате» / «По предмету» / «Зачётка» (связанная группа кнопок)
 // ---------------------------------------------------------------------------
 
-private enum class MarksTab(val title: String) {
-    ByDate("По дате"),
-    BySubject("Предметы"),
-    GradeBook("Зачётка"),
-    Annual("Годовые"),
+private enum class MarksTab(@StringRes val title: Int) {
+    ByDate(R.string.marks_tab_by_date),
+    BySubject(R.string.marks_tab_by_subject),
+    GradeBook(R.string.marks_tab_gradebook),
+    Annual(R.string.marks_tab_annual),
 }
 
-private enum class SubjectSort(val title: String) {
-    ByAverage("По среднему баллу"),
-    ByUpdated("По дате последней оценки"),
-    Alphabetical("По алфавиту А-Я"),
+private enum class SubjectSort(@StringRes val title: Int) {
+    ByAverage(R.string.marks_sort_by_average),
+    ByUpdated(R.string.marks_sort_by_updated),
+    Alphabetical(R.string.marks_sort_alphabetical),
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -328,7 +342,12 @@ fun MarksScreen(viewModel: MarksViewModel) {
     val context = LocalContext.current
 
     LaunchedEffect(viewModel) {
-        viewModel.messages.collect { Toast.makeText(context, it, Toast.LENGTH_LONG).show() }
+        viewModel.messages.collect { msg ->
+            // Внутри LaunchedEffect composable-вызовов нет — берём текст через Context.
+            val text = msg.detail?.let { context.getString(R.string.marks_refresh_failed_detail, it) }
+                ?: context.getString(msg.textRes)
+            mesSnackbar.show(text, duration = SnackbarDuration.Long)
+        }
     }
 
     // BottomSheet деталей оценки
@@ -352,6 +371,10 @@ fun MarksScreen(viewModel: MarksViewModel) {
             onDismissRequest = viewModel::closeCalculator,
             sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
         ) {
+            // Высоту шторки Material3 считает сам и уже вычитает клавиатуру, поэтому
+            // imePadding здесь был бы вторым вычитанием: он сжимал контент вдвое, а
+            // поле уезжало под клавиатуру. Достаточно скролла в MarkCalculator —
+            // он даёт Compose довести сфокусированное поле до видимой части.
             MarkCalculator(
                 subjectName = subject.subjectName,
                 period = period,
@@ -377,19 +400,21 @@ fun MarksScreen(viewModel: MarksViewModel) {
                 state.subjects.isEmpty() -> ScrollableFill {
                     EmptyState(
                         icon = Icons.Rounded.Star,
-                        title = "Оценок пока нет",
-                        subtitle = "Здесь появятся отметки по предметам",
+                        title = stringResource(R.string.marks_empty_title),
+                        subtitle = stringResource(R.string.marks_empty_subtitle),
                     )
                 }
 
                 else -> {
+                    // Подписи вкладок разворачиваем здесь: label у группы — обычная лямбда.
+                    val tabTitles = MarksTab.entries.map { stringResource(it.title) }
                     ConnectedChoiceGroup(
                         options = MarksTab.entries,
                         selected = tab,
                         onSelect = { tab = it },
                         // Без иконок: с ними четыре вкладки не помещаются на узком экране.
-                        label = { it.title },
-                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                        label = { tabTitles[it.ordinal] },
+                        modifier = Modifier.padding(horizontal = Spacing.l, vertical = Spacing.s),
                     )
                     AnimatedContent(
                         targetState = tab,
@@ -433,22 +458,29 @@ private fun MarksByDate(state: MarksViewModel.MarksUiState, viewModel: MarksView
     if (groups.isEmpty()) {
         EmptyState(
             icon = Icons.Rounded.DateRange,
-            title = "Оценок за месяц нет",
-            subtitle = "Показаны оценки за последние 4 недели",
+            title = stringResource(R.string.marks_by_date_empty_title),
+            subtitle = stringResource(R.string.marks_by_date_empty_subtitle),
         )
         return
     }
 
     LazyColumn(
-        modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 24.dp),
+        modifier = Modifier
+            .fillMaxSize()
+            .mesFadeTop(),
+        contentPadding = PaddingValues(
+            start = Spacing.l,
+            end = Spacing.l,
+            bottom = Spacing.xl + mesDockReservedHeight(),
+        ),
         verticalArrangement = Arrangement.spacedBy(GroupGap),
     ) {
         groups.forEach { (date, dayMarks) ->
             item(key = "day_$date") {
                 SectionHeader(
-                    date?.let { "${it.toRuDate()}, ${it.dayOfWeek.toFullRu()}" } ?: "Без даты",
-                    modifier = Modifier.padding(top = 12.dp, bottom = 6.dp),
+                    date?.let { "${it.toRuDate()}, ${it.dayOfWeek.toFullRu()}" }
+                        ?: stringResource(R.string.marks_no_date),
+                    modifier = Modifier.padding(top = Spacing.m, bottom = 6.dp),
                     trailing = {
                         StatusPill(
                             "${dayMarks.size}",
@@ -475,13 +507,13 @@ private fun MarksByDate(state: MarksViewModel.MarksUiState, viewModel: MarksView
         }
         item {
             Text(
-                "Показаны оценки за последний месяц",
+                stringResource(R.string.marks_by_date_footer),
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 textAlign = TextAlign.Center,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(vertical = 16.dp),
+                    .padding(vertical = Spacing.l),
             )
         }
     }
@@ -531,29 +563,26 @@ private fun MarksBySubject(
                 Row(
                     Modifier
                         .fillMaxWidth()
-                        .padding(vertical = 8.dp),
+                        .padding(vertical = Spacing.s),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Row(
                         Modifier
                             .weight(1f)
                             .horizontalScroll(rememberScrollState())
-                            .padding(start = 16.dp, end = 8.dp),
+                            .padding(start = Spacing.l, end = Spacing.s),
                         horizontalArrangement = Arrangement.spacedBy(ButtonGroupDefaults.ConnectedSpaceBetween),
                     ) {
-                        val options = periods + FINALS
+                        // null вместо названия — псевдо-период «Итоговые»: подпись у него своя.
+                        val options: List<String?> = periods + null
                         options.forEachIndexed { index, title ->
-                            val isFinals = title == FINALS
+                            val isFinals = title == null
                             val checked = if (isFinals) finalSelected else !finalSelected && title == currentPeriod
                             ToggleButton(
                                 checked = checked,
                                 onCheckedChange = {
-                                    if (isFinals) {
-                                        finalSelected = true
-                                    } else {
-                                        currentPeriod = title
-                                        finalSelected = false
-                                    }
+                                    if (title != null) currentPeriod = title
+                                    finalSelected = isFinals
                                 },
                                 shapes = when (index) {
                                     0 -> ButtonGroupDefaults.connectedLeadingButtonShapes()
@@ -568,27 +597,27 @@ private fun MarksBySubject(
                                         modifier = Modifier.size(ToggleButtonDefaults.IconSize),
                                     )
                                     Spacer(Modifier.size(ToggleButtonDefaults.IconSpacing))
+                                    Text(stringResource(R.string.marks_period_finals), maxLines = 1)
+                                } else {
+                                    Text(title.orEmpty(), maxLines = 1)
                                 }
-                                Text(title, maxLines = 1)
                             }
                         }
                     }
                     if (!finalSelected) SortButton(sort) { sort = it }
-                    Spacer(Modifier.width(8.dp))
+                    Spacer(Modifier.width(Spacing.s))
                 }
             }
         }
     }
 }
 
-private const val FINALS = "Итоговые"
-
 @Composable
 private fun SortButton(sort: SubjectSort, onSort: (SubjectSort) -> Unit) {
     var expanded by remember { mutableStateOf(false) }
     Box {
         FilledTonalIconButton(onClick = { expanded = true }, shapes = IconButtonDefaults.shapes()) {
-            Icon(Icons.AutoMirrored.Rounded.Sort, contentDescription = "Сортировка")
+            Icon(Icons.AutoMirrored.Rounded.Sort, contentDescription = stringResource(R.string.marks_sort_cd))
         }
         DropdownMenu(
             expanded = expanded,
@@ -597,7 +626,7 @@ private fun SortButton(sort: SubjectSort, onSort: (SubjectSort) -> Unit) {
         ) {
             SubjectSort.entries.forEach { option ->
                 DropdownMenuItem(
-                    text = { Text(option.title) },
+                    text = { Text(stringResource(option.title)) },
                     onClick = {
                         onSort(option)
                         expanded = false
@@ -636,9 +665,11 @@ private fun SubjectsList(
     }
 
     LazyColumn(
-        modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 16.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
+        modifier = Modifier
+            .fillMaxSize()
+            .mesFadeTop(),
+        contentPadding = PaddingValues(start = Spacing.l, end = Spacing.l, top = Spacing.xs, bottom = Spacing.xl + mesDockReservedHeight()),
+        verticalArrangement = Arrangement.spacedBy(Spacing.s),
     ) {
         items(subjects, key = { it.subjectId }) { subject ->
             val period = subject.periods.first { it.title == currentPeriod }
@@ -672,12 +703,15 @@ private fun SubjectCard(
                     overflow = TextOverflow.Ellipsis,
                 )
                 Text(
-                    "${period.marks.size} ${pluralRu(period.marks.size, "оценка", "оценки", "оценок")} · калькулятор",
+                    stringResource(
+                        R.string.marks_subject_marks_calc,
+                        "${period.marks.size} ${pluralRu(period.marks.size, "оценка", "оценки", "оценок")}",
+                    ),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-            Spacer(Modifier.width(8.dp))
+            Spacer(Modifier.width(Spacing.s))
             if (period.fixedValue != null) {
                 FinalChip(period.fixedValue!!)
                 Spacer(Modifier.width(6.dp))
@@ -716,8 +750,10 @@ private fun FinalsTable(state: MarksViewModel.MarksUiState) {
     val subjects = state.subjects.filter { it.periods.isNotEmpty() }
 
     LazyColumn(
-        modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 16.dp),
+        modifier = Modifier
+            .fillMaxSize()
+            .mesFadeTop(),
+        contentPadding = PaddingValues(start = Spacing.l, end = Spacing.l, top = Spacing.xs, bottom = Spacing.xl + mesDockReservedHeight()),
         verticalArrangement = Arrangement.spacedBy(GroupGap),
     ) {
         // Заголовок: римские цифры периодов
@@ -725,22 +761,26 @@ private fun FinalsTable(state: MarksViewModel.MarksUiState) {
             Row(
                 Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                    .padding(horizontal = Spacing.m, vertical = Spacing.s),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(
-                    "Предмет",
+                    stringResource(R.string.marks_finals_subject),
                     modifier = Modifier.weight(1f),
                     style = MaterialTheme.typography.labelLarge,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 periods.forEachIndexed { i, _ ->
-                    Box(Modifier.size(40.dp).padding(2.dp), contentAlignment = Alignment.Center) {
+                    Box(Modifier.size(40.dp).padding(Spacing.xxs), contentAlignment = Alignment.Center) {
                         Text(romanNumeral(i + 1), style = MaterialTheme.typography.labelLargeEmphasized)
                     }
                 }
                 Box(Modifier.size(44.dp), contentAlignment = Alignment.Center) {
-                    Icon(Icons.Rounded.Star, contentDescription = "Год", tint = MaterialTheme.colorScheme.tertiary)
+                    Icon(
+                        Icons.Rounded.Star,
+                        contentDescription = stringResource(R.string.marks_finals_year_cd),
+                        tint = MaterialTheme.colorScheme.tertiary,
+                    )
                 }
             }
         }
@@ -752,7 +792,7 @@ private fun FinalsTable(state: MarksViewModel.MarksUiState) {
                 Row(
                     Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 12.dp, vertical = 6.dp),
+                        .padding(horizontal = Spacing.m, vertical = 6.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Text(
@@ -764,9 +804,9 @@ private fun FinalsTable(state: MarksViewModel.MarksUiState) {
                     )
                     periods.forEach { p ->
                         val mark = subject.periods.firstOrNull { it.title == p.title }
-                        Box(Modifier.padding(2.dp)) { MarkSimple(mark?.fixedValue ?: mark?.value, size = 36.dp) }
+                        Box(Modifier.padding(Spacing.xxs)) { MarkSimple(mark?.fixedValue ?: mark?.value, size = 36.dp) }
                     }
-                    Box(Modifier.padding(start = 4.dp)) { MarkSimple(subject.yearMark, size = 40.dp, emphasized = true) }
+                    Box(Modifier.padding(start = Spacing.xs)) { MarkSimple(subject.yearMark, size = 40.dp, emphasized = true) }
                 }
             }
         }
@@ -824,7 +864,7 @@ fun AverageChip(value: String, dynamic: String) {
         contentColor = tone.content,
     ) {
         Row(
-            Modifier.padding(start = 6.dp, end = 12.dp, top = 6.dp, bottom = 6.dp),
+            Modifier.padding(start = 6.dp, end = Spacing.m, top = 6.dp, bottom = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Icon(
@@ -851,14 +891,18 @@ fun FinalChip(fixedValue: String) {
         shape = MaterialTheme.shapes.extraLarge,
         color = tone.container,
         contentColor = tone.content,
-        border = BorderStroke(2.dp, tone.content.copy(alpha = 0.4f)),
+        border = BorderStroke(Spacing.xxs, tone.content.copy(alpha = 0.4f)),
     ) {
         Row(
-            Modifier.padding(start = 8.dp, end = 12.dp, top = 5.dp, bottom = 5.dp),
+            Modifier.padding(start = Spacing.s, end = Spacing.m, top = 5.dp, bottom = 5.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Icon(Icons.Rounded.Done, contentDescription = "Итоговая", modifier = Modifier.size(16.dp))
-            Spacer(Modifier.width(4.dp))
+            Icon(
+                Icons.Rounded.Done,
+                contentDescription = stringResource(R.string.marks_final_cd),
+                modifier = Modifier.size(16.dp),
+            )
+            Spacer(Modifier.width(Spacing.xs))
             Text(fixedValue, style = MaterialTheme.typography.titleMediumEmphasized)
         }
     }
@@ -879,14 +923,18 @@ private fun romanNumeral(n: Int): String = when (n) {
 private fun GradeBookScreen(state: MarksViewModel.MarksUiState, onRetry: () -> Unit) {
     val gradeBook = state.gradeBook
     when {
-        gradeBook == null && state.gradeBookError != null -> ScrollableFill {
-            ErrorState(title = "Не удалось загрузить зачётку", onRetry = onRetry, details = state.gradeBookError)
+        gradeBook == null && state.gradeBookFailed -> ScrollableFill {
+            ErrorState(
+                title = stringResource(R.string.marks_gradebook_error),
+                onRetry = onRetry,
+                details = state.gradeBookError,
+            )
         }
-        gradeBook == null -> LoadingState(label = "Загружаем зачётку…")
+        gradeBook == null -> LoadingState(label = stringResource(R.string.marks_gradebook_loading))
         gradeBook.courses.isEmpty() -> EmptyState(
             icon = Icons.Rounded.WorkspacePremium,
-            title = "Зачётка пуста",
-            subtitle = "Здесь появятся итоговые аттестации по курсам",
+            title = stringResource(R.string.marks_gradebook_empty_title),
+            subtitle = stringResource(R.string.marks_gradebook_empty_subtitle),
         )
 
         else -> {
@@ -899,8 +947,8 @@ private fun GradeBookScreen(state: MarksViewModel.MarksUiState, onRetry: () -> U
             Column(Modifier.fillMaxSize()) {
                 // Курсы и семестры — связанные группы сверху
                 Column(
-                    Modifier.padding(horizontal = 16.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                    Modifier.padding(horizontal = Spacing.l),
+                    verticalArrangement = Arrangement.spacedBy(Spacing.s),
                 ) {
                     if (gradeBook.courses.size > 1) {
                         ConnectedChoiceGroup(
@@ -914,26 +962,32 @@ private fun GradeBookScreen(state: MarksViewModel.MarksUiState, onRetry: () -> U
                         )
                     }
                     if (semesters.size > 1 && sem != null) {
+                        // Номер семестра по порядку внутри курса: подписи готовим заранее.
+                        val semesterLabels = semesters.mapIndexed { index, s ->
+                            s.name to stringResource(R.string.marks_semester_number, index + 1)
+                        }.toMap()
                         ConnectedChoiceGroup(
                             options = semesters.map { it.name },
                             selected = sem.name,
                             onSelect = { semester = it },
                             // МЭШ нумерует семестры сквозь все курсы (2 курс — «3/4 семестр»); показываем по порядку внутри курса.
-                            label = { name -> "${semesters.indexOfFirst { it.name == name } + 1} семестр" },
+                            label = { name -> semesterLabels[name] ?: name },
                         )
                     }
                 }
                 LazyColumn(
-                    Modifier.weight(1f),
-                    contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 16.dp),
+                    Modifier
+                        .weight(1f)
+                        .mesFadeTop(),
+                    contentPadding = PaddingValues(start = Spacing.l, end = Spacing.l, bottom = Spacing.xl + mesDockReservedHeight()),
                     verticalArrangement = Arrangement.spacedBy(GroupGap),
                 ) {
                     sem?.forms?.forEach { form ->
                         if (form.subjects.isEmpty()) return@forEach
                         item(key = "form_${current.name}_${sem.name}_${form.formName}") {
                             SectionHeader(
-                                formNameRu(form.formName),
-                                modifier = Modifier.padding(top = 12.dp, bottom = 6.dp),
+                                formName(form.formName),
+                                modifier = Modifier.padding(top = Spacing.m, bottom = 6.dp),
                             )
                         }
                         itemsIndexed(
@@ -953,7 +1007,7 @@ private fun GradeBookScreen(state: MarksViewModel.MarksUiState, onRetry: () -> U
 @Composable
 private fun GradeBookCard(subject: GradeBook.Subject, shape: Shape) {
     val details = listOfNotNull(
-        subject.hours?.let { "$it ч." },
+        subject.hours?.let { stringResource(R.string.marks_hours_short, it) },
         subject.date?.format(DateTimeFormatter.ofPattern("dd.MM.yyyy")),
         subject.teachers.firstOrNull(),
     ).joinToString(" · ")
@@ -970,18 +1024,18 @@ private fun GradeBookCard(subject: GradeBook.Subject, shape: Shape) {
                 }
                 subject.theme?.let {
                     Text(
-                        "Тема: $it",
+                        stringResource(R.string.marks_theme, it),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
             }
-            Spacer(Modifier.width(12.dp))
+            Spacer(Modifier.width(Spacing.m))
             when {
                 subject.value != null -> MarkBadge(subject.value.toString())
 
                 subject.academicDebt -> StatusPill(
-                    "Долг",
+                    stringResource(R.string.marks_debt),
                     icon = Icons.Rounded.ErrorOutline,
                     containerColor = MaterialTheme.colorScheme.errorContainer,
                     contentColor = MaterialTheme.colorScheme.onErrorContainer,
@@ -1001,15 +1055,19 @@ private fun GradeBookCard(subject: GradeBook.Subject, shape: Shape) {
 private fun AnnualMarksScreen(state: MarksViewModel.MarksUiState, onRetry: () -> Unit) {
     val years = state.finalMarks
     when {
-        years == null && state.finalMarksError != null -> ScrollableFill {
-            ErrorState(title = "Не удалось загрузить годовые оценки", onRetry = onRetry, details = state.finalMarksError)
+        years == null && state.finalMarksFailed -> ScrollableFill {
+            ErrorState(
+                title = stringResource(R.string.marks_annual_error),
+                onRetry = onRetry,
+                details = state.finalMarksError,
+            )
         }
-        years == null -> LoadingState(label = "Загружаем годовые оценки…")
+        years == null -> LoadingState(label = stringResource(R.string.marks_annual_loading))
         years.isEmpty() -> ScrollableFill {
             EmptyState(
                 icon = Icons.Rounded.WorkspacePremium,
-                title = "Годовых оценок нет",
-                subtitle = "Здесь появятся итоговые оценки за учебные годы",
+                title = stringResource(R.string.marks_annual_empty_title),
+                subtitle = stringResource(R.string.marks_annual_empty_subtitle),
             )
         }
 
@@ -1020,31 +1078,40 @@ private fun AnnualMarksScreen(state: MarksViewModel.MarksUiState, onRetry: () ->
                 if (years.size > 1) {
                     // Старые годы слева, как на шкале времени.
                     val ordered = years.indices.reversed().toList()
+                    val yearTitles = years.map { it.shortTitle() }
                     ConnectedChoiceGroup(
                         options = ordered,
                         selected = years.indexOf(year),
                         onSelect = { selected = it },
-                        label = { years[it].shortTitle() },
+                        label = { yearTitles[it] },
                         fill = years.size <= 5,
                         modifier = Modifier
-                            .padding(horizontal = 16.dp)
+                            .padding(horizontal = Spacing.l)
                             .then(if (years.size > 5) Modifier.horizontalScroll(rememberScrollState()) else Modifier),
                     )
                 }
                 LazyColumn(
-                    Modifier.weight(1f),
-                    contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 16.dp),
+                    Modifier
+                        .weight(1f)
+                        .mesFadeTop(),
+                    contentPadding = PaddingValues(start = Spacing.l, end = Spacing.l, bottom = Spacing.xl + mesDockReservedHeight()),
                     verticalArrangement = Arrangement.spacedBy(GroupGap),
                 ) {
                     item(key = "annual_header_${year.title}_${year.year}") {
                         SectionHeader(
-                            listOfNotNull(year.title?.let { "$it учебный год" } ?: year.year?.let { "$it-й год обучения" }, year.level)
-                                .joinToString(" · "),
-                            modifier = Modifier.padding(top = 12.dp, bottom = 6.dp),
+                            listOfNotNull(
+                                year.title?.let { stringResource(R.string.marks_academic_year, it) }
+                                    ?: year.year?.let { stringResource(R.string.marks_study_year, it) },
+                                year.level,
+                            ).joinToString(" · "),
+                            modifier = Modifier.padding(top = Spacing.m, bottom = 6.dp),
                             trailing = year.average?.let { avg ->
                                 {
                                     StatusPill(
-                                        "Средний ${"%.2f".format(avg).replace('.', ',')}",
+                                        stringResource(
+                                            R.string.marks_average_short,
+                                            "%.2f".format(avg).replace('.', ','),
+                                        ),
                                         icon = Icons.Rounded.Star,
                                         containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
                                         contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -1080,17 +1147,20 @@ private fun AnnualMarksScreen(state: MarksViewModel.MarksUiState, onRetry: () ->
 }
 
 /** «2023-2024» → «23/24». */
+@Composable
 private fun FinalMarksYear.shortTitle(): String =
     title?.split('-')?.takeIf { it.size == 2 && it.all { p -> p.length == 4 } }
         ?.joinToString("/") { it.takeLast(2) }
         ?: title
-        ?: year?.let { "$it год" }
+        ?: year?.let { stringResource(R.string.marks_year_short, it) }
         ?: "—"
 
-private fun formNameRu(form: String): String = when (form) {
-    "EXAM" -> "Экзамены"
-    "TEST" -> "Дифференцированные зачёты"
-    "PRACTICE" -> "Практика"
+/** Код формы аттестации → подпись; неизвестный код показываем как пришёл. */
+@Composable
+private fun formName(form: String): String = when (form) {
+    "EXAM" -> stringResource(R.string.marks_form_exam)
+    "TEST" -> stringResource(R.string.marks_form_test)
+    "PRACTICE" -> stringResource(R.string.marks_form_practice)
     else -> form
 }
 
@@ -1101,27 +1171,31 @@ private fun formNameRu(form: String): String = when (form) {
 @Composable
 private fun MarkDetailsSheet(details: MarkDetails, loading: Boolean) {
     val info = listOfNotNull(
-        details.controlFormName?.let { Triple(Icons.AutoMirrored.Rounded.Assignment, "Форма контроля", it) },
-        details.teacherName?.let { Triple(Icons.Rounded.Person, "Учитель", it) },
-        details.date?.let {
-            Triple(Icons.Rounded.DateRange, "Дата", it.toRuDate(includeYear = true))
+        details.controlFormName?.let {
+            Triple(Icons.AutoMirrored.Rounded.Assignment, stringResource(R.string.marks_control_form), it)
         },
-        details.lessonTopic?.let { Triple(Icons.Rounded.Topic, "Тема урока", it) },
+        details.teacherName?.let { Triple(Icons.Rounded.Person, stringResource(R.string.marks_teacher), it) },
+        details.date?.let {
+            Triple(Icons.Rounded.DateRange, stringResource(R.string.marks_date), it.toRuDate(includeYear = true))
+        },
+        details.lessonTopic?.let {
+            Triple(Icons.Rounded.Topic, stringResource(R.string.marks_lesson_topic), it)
+        },
     )
 
     Column(
         Modifier
             .fillMaxWidth()
             .verticalScroll(rememberScrollState())
-            .padding(horizontal = 16.dp)
-            .padding(bottom = 24.dp),
+            .padding(horizontal = Spacing.l)
+            .padding(bottom = Spacing.xl),
         verticalArrangement = Arrangement.spacedBy(GroupGap),
     ) {
         // Шапка: большая оценка + предмет
         Row(
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(16.dp),
-            modifier = Modifier.padding(bottom = 12.dp),
+            horizontalArrangement = Arrangement.spacedBy(Spacing.l),
+            modifier = Modifier.padding(bottom = Spacing.m),
         ) {
             val tone = markTone(details.value)
             Surface(Modifier.size(72.dp), shape = markShape(details.value), color = tone.container, contentColor = tone.content) {
@@ -1133,7 +1207,7 @@ private fun MarkDetailsSheet(details: MarkDetails, loading: Boolean) {
                 Text(details.subjectName, style = MaterialTheme.typography.headlineSmallEmphasized)
                 if (details.weight > 1) {
                     Text(
-                        "Вес ${details.weight}",
+                        stringResource(R.string.marks_weight, details.weight),
                         style = MaterialTheme.typography.bodyLarge,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -1154,7 +1228,7 @@ private fun MarkDetailsSheet(details: MarkDetails, loading: Boolean) {
 
         // Комментарий
         details.comment?.takeIf { it.isNotBlank() }?.let {
-            SectionHeader("Комментарий", Modifier.padding(top = 8.dp))
+            SectionHeader(stringResource(R.string.marks_comment), Modifier.padding(top = Spacing.s))
             MesCard(containerColor = MaterialTheme.colorScheme.tertiaryContainer, contentColor = MaterialTheme.colorScheme.onTertiaryContainer) {
                 Text(it, style = MaterialTheme.typography.bodyLarge)
             }
@@ -1162,7 +1236,7 @@ private fun MarkDetailsSheet(details: MarkDetails, loading: Boolean) {
 
         // Критериальные оценки
         if (details.criteria.isNotEmpty()) {
-            SectionHeader("Критерии", Modifier.padding(top = 8.dp))
+            SectionHeader(stringResource(R.string.marks_criteria), Modifier.padding(top = Spacing.s))
             details.criteria.forEachIndexed { index, c ->
                 MesListItem(
                     headline = c.name,
@@ -1177,14 +1251,17 @@ private fun MarkDetailsSheet(details: MarkDetails, loading: Boolean) {
 
         // Распределение оценок класса
         details.classResults?.let { cr ->
-            SectionHeader("Оценки класса · ${cr.totalStudents} чел.", Modifier.padding(top = 8.dp))
+            SectionHeader(
+                stringResource(R.string.marks_class_results, cr.totalStudents),
+                Modifier.padding(top = Spacing.s),
+            )
             MesCard(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh) {
                 Row(
                     Modifier
                         .fillMaxWidth()
                         .height(140.dp),
                     verticalAlignment = Alignment.Bottom,
-                    horizontalArrangement = Arrangement.spacedBy(12.dp, Alignment.CenterHorizontally),
+                    horizontalArrangement = Arrangement.spacedBy(Spacing.m, Alignment.CenterHorizontally),
                 ) {
                     cr.distributions.sortedByDescending { it.value }.forEach { d ->
                         val label = d.value?.toInt()?.toString()
@@ -1209,7 +1286,7 @@ private fun MarkDetailsSheet(details: MarkDetails, loading: Boolean) {
                                         MaterialTheme.shapes.medium,
                                     ),
                             )
-                            Spacer(Modifier.height(4.dp))
+                            Spacer(Modifier.height(Spacing.xs))
                             Text(
                                 label ?: "?",
                                 style = if (mine) MaterialTheme.typography.titleMediumEmphasized else MaterialTheme.typography.titleMedium,

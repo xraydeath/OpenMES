@@ -26,7 +26,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.unit.dp
+import androidx.compose.ui.res.stringResource
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
@@ -53,6 +53,7 @@ import ru.openmes.core.designsystem.components.SectionHeader
 import ru.openmes.core.designsystem.components.StatusPill
 import ru.openmes.core.designsystem.components.groupShape
 import ru.openmes.core.designsystem.components.openUrl
+import ru.openmes.core.designsystem.theme.Spacing
 import ru.openmes.core.model.ProfEvent
 import ru.openmes.core.model.ProfIndustry
 import ru.openmes.core.model.Proforientation
@@ -107,6 +108,12 @@ fun ProforientationScreen(viewModel: ProforientationViewModel) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val data = state.data
     val context = LocalContext.current
+    // Содержимое LazyColumn — обычная функция, строки для неё разворачиваем здесь.
+    val resultsTitle = stringResource(R.string.more_prof_results)
+    val recommendedTitle = stringResource(R.string.more_prof_recommended)
+    val visitedLabel = stringResource(R.string.more_prof_event_visited)
+    val upcomingTitle = stringResource(R.string.more_prof_events_upcoming)
+    val historyTitle = stringResource(R.string.more_prof_events_history)
 
     MesPullToRefreshBox(
         isRefreshing = state.loading && data != null,
@@ -116,50 +123,58 @@ fun ProforientationScreen(viewModel: ProforientationViewModel) {
         when {
             state.loading && data == null -> LoadingState()
             data == null -> ScrollableFill {
-                ErrorState(title = "Профориентация недоступна", onRetry = viewModel::refresh, details = state.error)
+                ErrorState(
+                    title = stringResource(R.string.more_prof_error),
+                    onRetry = viewModel::refresh,
+                    details = state.error,
+                )
             }
 
             data.testUrl == null && data.industries.isEmpty() && data.upcoming.isEmpty() && data.history.isEmpty() ->
                 ScrollableFill {
                     EmptyState(
                         icon = Icons.Rounded.Explore,
-                        title = "Результатов пока нет",
-                        subtitle = "Пройдите профориентационное тестирование",
+                        title = stringResource(R.string.more_prof_empty),
+                        subtitle = stringResource(R.string.more_prof_empty_sub),
                     )
                 }
 
             else -> LazyColumn(
                 modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 24.dp),
+                contentPadding = PaddingValues(start = Spacing.l, end = Spacing.l, top = Spacing.s, bottom = Spacing.xl),
                 verticalArrangement = Arrangement.spacedBy(GroupGap),
             ) {
                 item {
                     HeroCard {
-                        Text("Профориентация", style = MaterialTheme.typography.titleLargeEmphasized)
+                        Text(stringResource(R.string.more_prof_title), style = MaterialTheme.typography.titleLargeEmphasized)
                         Text(
-                            data.testDate?.let { "Тест пройден ${it.toLocalDate().toRuDate(includeYear = true)}" }
-                                ?: "Тест ещё не пройден",
+                            data.testDate?.let {
+                                stringResource(R.string.more_prof_test_passed, it.toLocalDate().toRuDate(includeYear = true))
+                            } ?: stringResource(R.string.more_prof_test_not_passed),
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f),
                         )
                         if (data.industries.isNotEmpty()) {
                             Text(
-                                "Подходящие отрасли: " + data.industries.joinToString { it.name },
+                                stringResource(
+                                    R.string.more_prof_industries,
+                                    data.industries.joinToString { it.name },
+                                ),
                                 style = MaterialTheme.typography.bodyMedium,
-                                modifier = Modifier.padding(top = 8.dp),
+                                modifier = Modifier.padding(top = Spacing.s),
                             )
                         }
                     }
                 }
                 val links = listOfNotNull(
-                    data.testUrl?.let { Triple(Icons.Rounded.Assignment, "Отчёт о тестировании", it) },
-                    data.detailsUrl?.let { Triple(Icons.Rounded.Explore, "Подробные результаты", it) },
+                    data.testUrl?.let { Triple(Icons.Rounded.Assignment, R.string.more_prof_report, it) },
+                    data.detailsUrl?.let { Triple(Icons.Rounded.Explore, R.string.more_prof_details, it) },
                 )
                 if (links.isNotEmpty()) {
-                    item { SectionHeader("Результаты", Modifier.padding(top = 12.dp)) }
+                    item { SectionHeader(resultsTitle, Modifier.padding(top = Spacing.m)) }
                     itemsIndexed(links) { index, (icon, title, url) ->
                         MesListItem(
-                            headline = title,
+                            headline = stringResource(title),
                             icon = icon,
                             onClick = { context.openUrl(url) },
                             trailingContent = { Icon(Icons.AutoMirrored.Rounded.OpenInNew, contentDescription = null) },
@@ -168,13 +183,13 @@ fun ProforientationScreen(viewModel: ProforientationViewModel) {
                     }
                 }
                 if (data.industries.isNotEmpty()) {
-                    item { SectionHeader("Рекомендованные отрасли", Modifier.padding(top = 12.dp)) }
+                    item { SectionHeader(recommendedTitle, Modifier.padding(top = Spacing.m)) }
                     items(data.industries) { industry ->
-                        IndustryCard(industry, onOpen = { context.openUrl(it) }, modifier = Modifier.padding(bottom = 8.dp))
+                        IndustryCard(industry, onOpen = { context.openUrl(it) }, modifier = Modifier.padding(bottom = Spacing.s))
                     }
                 }
-                eventGroup("Записи на мероприятия", data.upcoming)
-                eventGroup("История мероприятий", data.history)
+                eventGroup(upcomingTitle, visitedLabel, data.upcoming)
+                eventGroup(historyTitle, visitedLabel, data.history)
             }
         }
     }
@@ -186,15 +201,15 @@ private fun IndustryCard(industry: ProfIndustry, onOpen: (String) -> Unit, modif
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(industry.name, style = MaterialTheme.typography.titleMediumEmphasized, modifier = Modifier.weight(1f))
             if (industry.atlasUrl != null) {
-                Icon(Icons.AutoMirrored.Rounded.OpenInNew, contentDescription = "Атлас колледжей")
+                Icon(Icons.AutoMirrored.Rounded.OpenInNew, contentDescription = stringResource(R.string.more_prof_atlas_cd))
             }
         }
         if (industry.specialties.isNotEmpty()) {
             Text(
-                "Специальности",
+                stringResource(R.string.more_prof_specialties),
                 style = MaterialTheme.typography.labelLarge,
                 color = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.padding(top = 8.dp),
+                modifier = Modifier.padding(top = Spacing.s),
             )
             industry.specialties.forEach {
                 Text(it, style = MaterialTheme.typography.bodyMedium)
@@ -202,12 +217,12 @@ private fun IndustryCard(industry: ProfIndustry, onOpen: (String) -> Unit, modif
         }
         if (industry.colleges.isNotEmpty()) {
             Text(
-                "Колледжи",
+                stringResource(R.string.more_prof_colleges),
                 style = MaterialTheme.typography.labelLarge,
                 color = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.padding(top = 8.dp),
+                modifier = Modifier.padding(top = Spacing.s),
             )
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(Spacing.s)) {
                 industry.colleges.forEach { college ->
                     AssistChip(
                         onClick = { college.atlasUrl?.let(onOpen) },
@@ -221,9 +236,13 @@ private fun IndustryCard(industry: ProfIndustry, onOpen: (String) -> Unit, modif
     }
 }
 
-private fun androidx.compose.foundation.lazy.LazyListScope.eventGroup(title: String, events: List<ProfEvent>) {
+private fun androidx.compose.foundation.lazy.LazyListScope.eventGroup(
+    title: String,
+    visitedLabel: String,
+    events: List<ProfEvent>,
+) {
     if (events.isEmpty()) return
-    item { SectionHeader(title, Modifier.padding(top = 12.dp)) }
+    item { SectionHeader(title, Modifier.padding(top = Spacing.m)) }
     itemsIndexed(events) { index, event ->
         MesListItem(
             headline = event.name,
@@ -235,7 +254,7 @@ private fun androidx.compose.foundation.lazy.LazyListScope.eventGroup(title: Str
             icon = if (event.visited) Icons.Rounded.CheckCircle else Icons.Rounded.Event,
             iconContainerColor = if (event.visited) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.secondaryContainer,
             iconContentColor = if (event.visited) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSecondaryContainer,
-            trailingContent = if (event.visited) ({ StatusPill("был") }) else null,
+            trailingContent = if (event.visited) ({ StatusPill(visitedLabel) }) else null,
             shape = groupShape(index, events.size),
         )
     }

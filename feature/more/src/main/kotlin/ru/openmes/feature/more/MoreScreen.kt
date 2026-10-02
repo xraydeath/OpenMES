@@ -15,7 +15,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.rounded.Chat
 import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
 import androidx.compose.material.icons.automirrored.rounded.Logout
 import androidx.compose.material.icons.rounded.AccountBalance
@@ -23,23 +22,16 @@ import androidx.compose.material.icons.rounded.Badge
 import androidx.compose.material.icons.rounded.DoorFront
 import androidx.compose.material.icons.rounded.BakeryDining
 import androidx.compose.material.icons.rounded.Book
-import androidx.compose.material.icons.rounded.CalendarMonth
 import androidx.compose.material.icons.rounded.Campaign
-import androidx.compose.material.icons.rounded.Celebration
-import androidx.compose.material.icons.rounded.Description
-import androidx.compose.material.icons.rounded.Extension
-import androidx.compose.material.icons.rounded.Map
-import androidx.compose.material.icons.rounded.Person
-import androidx.compose.material.icons.rounded.QrCode2
 import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material.icons.rounded.SportsScore
 import androidx.compose.material.icons.rounded.Work
 import androidx.compose.material.icons.rounded.WorkspacePremium
+import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialShapes
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.toShape
 import androidx.compose.runtime.Composable
@@ -50,38 +42,36 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import ru.openmes.core.data.Session
+import ru.openmes.feature.more.R
 import ru.openmes.core.designsystem.components.ConnectedChoiceGroup
 import ru.openmes.core.designsystem.components.GroupGap
 import ru.openmes.core.designsystem.components.HeroCard
+import ru.openmes.core.designsystem.components.mesDockReservedHeight
+import ru.openmes.core.designsystem.components.mesFadeTop
 import ru.openmes.core.designsystem.components.MesListItem
 import ru.openmes.core.designsystem.components.SectionHeader
 import ru.openmes.core.designsystem.components.clipToMaterialShape
 import ru.openmes.core.designsystem.components.groupShape
+import ru.openmes.core.designsystem.theme.Spacing
 
 /** Раздел в списке «Ещё». */
 private data class Service(
     val icon: ImageVector,
     val title: String,
     val subtitle: String? = null,
-    val onClick: (() -> Unit)? = null,
+    val onClick: () -> Unit,
 )
 
-/** Роадмап переноса из оригинала. */
-private val upcomingServices = listOf(
-    Service(Icons.Rounded.Extension, "Кружки", "Каталог и запись"),
-    Service(Icons.Rounded.Celebration, "Геймификация", "Звёзды, подарки, турниры"),
-    Service(Icons.Rounded.QrCode2, "Москвёнок", "QR-проход и идентификаторы"),
-    Service(Icons.AutoMirrored.Rounded.Chat, "Чаты", "Сферум (VK/MAX)"),
-    Service(Icons.Rounded.Description, "Справки", "Электронные справки"),
-    Service(Icons.Rounded.CalendarMonth, "Календарь", "События и мероприятия"),
-    Service(Icons.Rounded.Map, "Карта", "Школы и кружки рядом"),
-    Service(Icons.Rounded.Person, "Психолог", "Запись к специалисту"),
-)
-
+/**
+ * Предельная ширина контента. На телефоне не действует, на планшете и в альбомной
+ * ориентации удерживает колонку читаемой, а нижнюю навигацию — по центру.
+ * По гайдлайнам MD3 для Large (1200 dp+) — 840…1040 dp.
+ */
 /** Фигуры иконок доступных разделов — по одной на строку, для ритма. */
 private val serviceShapes = listOf(
     MaterialShapes.Cookie6Sided,
@@ -89,10 +79,7 @@ private val serviceShapes = listOf(
     MaterialShapes.Cookie9Sided,
 )
 
-/**
- * Экран «Ещё» — карта всех разделов оригинального «Колледжа МЭШ»:
- * доступные включены, остальные помечены «скоро» (роадмап переноса).
- */
+/** Экран «Ещё» — разделы, которые не помещаются в нижнюю навигацию. */
 @Composable
 fun MoreScreen(
     viewModel: MoreViewModel,
@@ -112,28 +99,35 @@ fun MoreScreen(
     val loggedIn = session as? Session.LoggedIn
 
     val available = listOf(
-        Service(Icons.Rounded.SportsScore, "Посещаемость", "Пропуски с начала учебного года", onOpenAttendance),
-        Service(Icons.Rounded.DoorFront, "Проходы", "Турникеты: приход, уход, время в колледже", onOpenVisits),
-        Service(Icons.Rounded.Badge, "Студенческий билет", "Электронный билет колледжа", onOpenStudentCard),
-        Service(Icons.Rounded.BakeryDining, "Питание", "Меню, баланс и операции по счёту", onOpenFood),
-        Service(Icons.Rounded.Campaign, "Новости", "Лента school.mos.ru", onOpenNews),
-        Service(Icons.Rounded.AccountBalance, "О колледже", "Контакты, кураторы, корпуса", onOpenSchoolInfo),
-        Service(Icons.Rounded.WorkspacePremium, "Портфолио", "Олимпиады, конкурсы, награды и ГТО", onOpenPortfolio),
-        Service(Icons.Rounded.Work, "Профориентация", "Тест, отрасли, дни открытых дверей", onOpenProforientation),
-        Service(Icons.Rounded.Book, "Библиотека МЭШ", "Учебники и материалы", onOpenLibrary),
-        Service(Icons.Rounded.Settings, "Настройки", "Тема, PIN-код, кэш, уведомления", onOpenSettings),
+        Service(Icons.Rounded.SportsScore, stringResource(R.string.more_service_attendance), stringResource(R.string.more_service_attendance_sub), onOpenAttendance),
+        Service(Icons.Rounded.DoorFront, stringResource(R.string.more_service_visits), stringResource(R.string.more_service_visits_sub), onOpenVisits),
+        Service(Icons.Rounded.Badge, stringResource(R.string.more_service_card), stringResource(R.string.more_service_card_sub), onOpenStudentCard),
+        Service(Icons.Rounded.BakeryDining, stringResource(R.string.more_service_food), stringResource(R.string.more_service_food_sub), onOpenFood),
+        Service(Icons.Rounded.Campaign, stringResource(R.string.more_service_news), stringResource(R.string.more_service_news_sub), onOpenNews),
+        Service(Icons.Rounded.AccountBalance, stringResource(R.string.more_service_school), stringResource(R.string.more_service_school_sub), onOpenSchoolInfo),
+        Service(Icons.Rounded.WorkspacePremium, stringResource(R.string.more_service_portfolio), stringResource(R.string.more_service_portfolio_sub), onOpenPortfolio),
+        Service(Icons.Rounded.Work, stringResource(R.string.more_service_prof), stringResource(R.string.more_service_prof_sub), onOpenProforientation),
+        Service(Icons.Rounded.Book, stringResource(R.string.more_service_library), stringResource(R.string.more_service_library_sub), onOpenLibrary),
+        Service(Icons.Rounded.Settings, stringResource(R.string.more_service_settings), stringResource(R.string.more_service_settings_sub), onOpenSettings),
     )
 
     LazyColumn(
-        modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 24.dp),
+        modifier = Modifier
+            .fillMaxSize()
+            .mesFadeTop(),
+        contentPadding = PaddingValues(
+            start = Spacing.l,
+            end = Spacing.l,
+            top = Spacing.s,
+            bottom = Spacing.xl + mesDockReservedHeight(),
+        ),
         verticalArrangement = Arrangement.spacedBy(GroupGap),
     ) {
         item { ProfileCard(loggedIn, avatar, onLogout = viewModel::logout) }
 
         // Выбор ребёнка (для родителей с несколькими детьми)
         if (loggedIn != null && loggedIn.children.size > 1) {
-            item { SectionHeader("Профиль ученика", Modifier.padding(top = 12.dp)) }
+            item { SectionHeader(stringResource(R.string.more_child_section), Modifier.padding(top = Spacing.m)) }
             item {
                 val current = loggedIn.children.firstOrNull { it.id == loggedIn.currentChild?.id }
                     ?: loggedIn.children.first()
@@ -147,7 +141,7 @@ fun MoreScreen(
             }
         }
 
-        item { SectionHeader("Разделы", Modifier.padding(top = 12.dp)) }
+        item { SectionHeader(stringResource(R.string.more_sections_header), Modifier.padding(top = Spacing.m)) }
         itemsIndexed(available) { index, service ->
             MesListItem(
                 headline = service.title,
@@ -168,27 +162,15 @@ fun MoreScreen(
             )
         }
 
-        item { SectionHeader("Скоро", Modifier.padding(top = 12.dp)) }
-        itemsIndexed(upcomingServices) { index, service ->
-            MesListItem(
-                headline = service.title,
-                supporting = service.subtitle,
-                icon = service.icon,
-                enabled = false,
-                shape = groupShape(index, upcomingServices.size),
-                containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
-            )
-        }
-
         item {
             Text(
-                text = "OpenMES — неофициальный открытый клиент.\nВсе разделы оригинала переносятся постепенно — следите за релизами.",
+                text = stringResource(R.string.more_profile_disclaimer),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 textAlign = TextAlign.Center,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(vertical = 24.dp),
+                    .padding(vertical = Spacing.xl),
             )
         }
     }
@@ -204,7 +186,7 @@ private fun ProfileCard(
     HeroCard {
         Row(
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(16.dp),
+            horizontalArrangement = Arrangement.spacedBy(Spacing.l),
         ) {
             Box(
                 modifier = Modifier
@@ -216,7 +198,7 @@ private fun ProfileCard(
                 if (avatar != null) {
                     Image(
                         bitmap = avatar,
-                        contentDescription = "Аватар",
+                        contentDescription = stringResource(R.string.more_avatar_cd),
                         contentScale = ContentScale.Crop,
                         modifier = Modifier.fillMaxSize(),
                     )
@@ -230,7 +212,7 @@ private fun ProfileCard(
             }
             Column(Modifier.weight(1f)) {
                 Text(
-                    text = person?.fullName?.takeIf { it.isNotBlank() } ?: "Профиль mos.ru",
+                    text = person?.fullName?.takeIf { it.isNotBlank() } ?: stringResource(R.string.more_profile_mosru),
                     style = MaterialTheme.typography.titleLargeEmphasized,
                 )
                 session?.currentChild?.let { child ->
@@ -242,10 +224,13 @@ private fun ProfileCard(
                 }
             }
         }
-        OutlinedButton(
+        // Не OutlinedButton: его контур рисуется цветом outline, а на карточке
+        // primaryContainer он почти совпадает с фоном — кнопка выглядела частью карточки.
+        // Залитая primary на primaryContainer контрастит и остаётся читаемой в обеих темах.
+        Button(
             onClick = onLogout,
             shapes = ButtonDefaults.shapes(),
-            modifier = Modifier.padding(top = 16.dp),
+            modifier = Modifier.padding(top = Spacing.l),
         ) {
             Icon(
                 Icons.AutoMirrored.Rounded.Logout,
@@ -253,7 +238,7 @@ private fun ProfileCard(
                 modifier = Modifier.size(ButtonDefaults.IconSize),
             )
             Spacer(Modifier.size(ButtonDefaults.IconSpacing))
-            Text("Выйти")
+            Text(stringResource(R.string.more_logout))
         }
     }
 }

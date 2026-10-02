@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Загрузка и ошибки -->
+    <string name="homework_load_failed">Ошибка загрузки</string>
+    <string name="homework_refresh_failed">Не удалось обновить задания</string>
+    <string name="homework_save_done_failed">Не удалось сохранить отметку</string>
+    <string name="homework_material_no_url">У материала нет ссылки</string>
+    <string name="homework_material_open_failed">Не удалось открыть материал</string>
+    <!-- Строка ошибки и деталь от сервера/сети: «Не удалось…: Таймаут» -->
+    <string name="homework_error_detail">%1$s: %2$s</string>
+
+    <!-- День и карточка задания -->
+    <string name="homework_empty_title">Заданий нет</string>
+    <string name="homework_empty_subtitle">На этот день ничего не задали</string>
+    <string name="homework_day_title">%1$s, %2$s</string>
+    <string name="homework_done_counter">%1$d из %2$d</string>
+    <string name="homework_materials_count">Материалов: %1$d</string>
+    <string name="homework_done">Выполнено</string>
+    <string name="homework_mark_done_cd">Отметить выполненным</string>
+    <string name="homework_copy_link_label">Скопировать ссылку</string>
+    <string name="homework_link_copied">Ссылка скопирована</string>
+    <string name="homework_material_link_clip">Ссылка на материал</string>
+
+    <!-- Встроенный браузер Библиотеки МЭШ -->
+    <string name="homework_library_title">Библиотека МЭШ</string>
+    <string name="homework_library_close_cd">Закрыть</string>
+    <string name="homework_library_reload_cd">Обновить</string>
+    <string name="homework_library_open_external_cd">Открыть в браузере</string>
+    <string name="homework_download_started">Скачивается: %1$s</string>
+    <string name="homework_no_app_for_link">Нет приложения для открытия ссылки</string>
+</resources>

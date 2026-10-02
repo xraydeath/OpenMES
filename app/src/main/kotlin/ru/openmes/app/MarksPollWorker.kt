@@ -31,6 +31,9 @@ import java.util.concurrent.TimeUnit
  * раз в час сравниваем с сохранёнными новые оценки, изменение уже поставленной
  * оценки и домашние задания (новые и с изменённым текстом). Первый запуск
  * только запоминает базу, без лавины уведомлений.
+ *
+ * Оценки и ДЗ молчат независимо: у каждого свой тумблер ([ru.openmes.core.data.AppSettings.marksNotifications]
+ * и [ru.openmes.core.data.AppSettings.homeworkChangeNotifications]). Воркер запускается, пока включён хоть один.
  */
 class MarksPollWorker(
     context: Context,
@@ -42,6 +45,7 @@ class MarksPollWorker(
 
     override suspend fun doWork(): Result {
         val childId = currentChildId() ?: return Result.success()
+        val settings = settingsRepository.settings.first()
 
         val subjects = runSuspendCatching { diaryRepository.getSubjectMarks(childId) }
             .getOrElse { return Result.retry() }
@@ -52,9 +56,19 @@ class MarksPollWorker(
         }.getOrNull()
 
         val prefs = applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-        val hideValues = settingsRepository.settings.first().hideMarkValues
-        diffMarks(prefs, childId, subjects, hideValues)
-        if (homeworks != null) diffHomeworks(prefs, childId, homeworks)
+        // Базу обновляем по обоим спискам даже при выключенном тумблере: включив его позже,
+        // ученик получит только то, что появилось действительно после, а не лавину за месяц.
+        diffMarks(
+            prefs, childId, subjects,
+            hideValues = settings.hideMarkValues,
+            notify = settings.marksNotifications,
+        )
+        if (homeworks != null) {
+            diffHomeworks(
+                prefs, childId, homeworks,
+                notify = settings.homeworkChangeNotifications,
+            )
+        }
         return Result.success()
     }
 
@@ -63,7 +77,13 @@ class MarksPollWorker(
      * записи старого формата (только id, до отслеживания изменений) дают
      * значение null — «неизвестно», изменением не считаем.
      */
-    private fun diffMarks(prefs: SharedPreferences, childId: String, subjects: List<SubjectMarksData>, hideValues: Boolean) {
+    private fun diffMarks(
+        prefs: SharedPreferences,
+        childId: String,
+        subjects: List<SubjectMarksData>,
+        hideValues: Boolean,
+        notify: Boolean,
+    ) {
         val key = "$KEY_MARKS_PREFIX$childId"
         val known = prefs.getStringSet(key, null)
         val knownValues = known.orEmpty().associate { entry ->
@@ -74,7 +94,7 @@ class MarksPollWorker(
             subject.periods.flatMap { it.marks }.map { subject.subjectName to it }
         }
         prefs.edit { putStringSet(key, marks.map { "${it.second.id}$SEP${it.second.value}" }.toSet()) }
-        if (known == null) return
+        if (known == null || !notify) return
 
         var notified = 0
         for ((subject, mark) in marks) {
@@ -100,12 +120,17 @@ class MarksPollWorker(
     }
 
     /** Новые ДЗ и правки текста задания; isDone не учитываем — его меняет сам ученик. */
-    private fun diffHomeworks(prefs: SharedPreferences, childId: String, homeworks: List<Homework>) {
+    private fun diffHomeworks(
+        prefs: SharedPreferences,
+        childId: String,
+        homeworks: List<Homework>,
+        notify: Boolean,
+    ) {
         val key = "$KEY_HOMEWORKS_PREFIX$childId"
         val known = prefs.getStringSet(key, null)
         val knownTasks = known.orEmpty().associate { it.substringBefore(SEP) to it.substringAfter(SEP) }
         prefs.edit { putStringSet(key, homeworks.map { "${it.id}$SEP${it.task}" }.toSet()) }
-        if (known == null) return
+        if (known == null || !notify) return
 
         var notified = 0
         for (homework in homeworks) {

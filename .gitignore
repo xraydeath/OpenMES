@@ -21,3 +21,8 @@ app/release/
 *.jks
 *.keystore
 *.hprof
+
+# Локальные настройки инструментов на этой машине.
+# compose-stability.conf НЕ здесь: на него ссылается build.gradle.kts,
+# без него сборка падает на нестабильных классах.
+.claude/

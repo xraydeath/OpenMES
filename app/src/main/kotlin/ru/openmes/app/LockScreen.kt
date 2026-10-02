@@ -54,12 +54,14 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.core.content.edit
 import androidx.fragment.app.FragmentActivity
 import ru.openmes.core.designsystem.components.ShapeIcon
 import ru.openmes.core.designsystem.components.rememberPressMorphShape
+import ru.openmes.core.designsystem.theme.Spacing
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -126,8 +128,8 @@ internal fun LockScreen(
             )
             prompt.authenticate(
                 BiometricPrompt.PromptInfo.Builder()
-                    .setTitle("Вход в OpenMES")
-                    .setNegativeButtonText("PIN-код")
+                    .setTitle(context.getString(R.string.lock_biometric_title))
+                    .setNegativeButtonText(context.getString(R.string.lock_biometric_negative))
                     .setAllowedAuthenticators(BIOMETRIC_WEAK)
                     .build(),
             )
@@ -195,7 +197,7 @@ internal fun LockScreen(
             // Поглощаем касания, чтобы они не доходили до контента под блокировкой.
             .clickable(interactionSource = null, indication = null) {}
             .systemBarsPadding()
-            .padding(24.dp),
+            .padding(Spacing.xl),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center,
     ) {
@@ -209,19 +211,21 @@ internal fun LockScreen(
         )
         Spacer(Modifier.height(20.dp))
         Text(
-            when {
-                lockedOut -> "Слишком много попыток"
-                error -> "Неверный PIN-код"
-                else -> "Введите PIN-код"
-            },
+            stringResource(
+                when {
+                    lockedOut -> R.string.lock_error_locked_out
+                    error -> R.string.lock_error_wrong_pin
+                    else -> R.string.lock_prompt
+                },
+            ),
             style = MaterialTheme.typography.headlineSmallEmphasized,
             color = if (error || lockedOut) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface,
         )
         if (lockedOut) {
             val seconds = (lockedUntil - now + 999) / 1_000
-            Spacer(Modifier.height(8.dp))
+            Spacer(Modifier.height(Spacing.s))
             Text(
-                "Повторите через %d:%02d".format(seconds / 60, seconds % 60),
+                stringResource(R.string.lock_retry_in, seconds / 60, seconds % 60),
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -272,7 +276,10 @@ internal fun LockScreen(
                         shapes = IconButtonDefaults.shapes(),
                         modifier = Modifier.size(56.dp),
                     ) {
-                        Icon(Icons.Rounded.Fingerprint, contentDescription = "Биометрия")
+                        Icon(
+                            Icons.Rounded.Fingerprint,
+                            contentDescription = stringResource(R.string.lock_biometric_cd),
+                        )
                     }
                 } else if (pin.isNotEmpty()) {
                     BackspaceButton(::erase)
@@ -288,7 +295,10 @@ internal fun LockScreen(
                         shapes = IconButtonDefaults.shapes(),
                         modifier = Modifier.size(56.dp),
                     ) {
-                        Icon(Icons.Rounded.Check, contentDescription = "Войти")
+                        Icon(
+                            Icons.Rounded.Check,
+                            contentDescription = stringResource(R.string.lock_sign_in_cd),
+                        )
                     }
                 }
             }
@@ -303,7 +313,7 @@ internal fun LockScreen(
             ) {
                 Icon(Icons.Rounded.Check, contentDescription = null, modifier = Modifier.size(ButtonDefaults.iconSizeFor(ButtonDefaults.MediumContainerHeight)))
                 Spacer(Modifier.width(ButtonDefaults.iconSpacingFor(ButtonDefaults.MediumContainerHeight)))
-                Text("Войти", style = MaterialTheme.typography.titleMedium)
+                Text(stringResource(R.string.lock_sign_in), style = MaterialTheme.typography.titleMedium)
             }
         }
     }
@@ -381,6 +391,9 @@ private fun KeypadButton(label: String, onClick: () -> Unit) {
 @Composable
 private fun BackspaceButton(onClick: () -> Unit) {
     IconButton(onClick = onClick, shapes = IconButtonDefaults.shapes(), modifier = Modifier.size(56.dp)) {
-        Icon(Icons.AutoMirrored.Rounded.Backspace, contentDescription = "Стереть")
+        Icon(
+            Icons.AutoMirrored.Rounded.Backspace,
+            contentDescription = stringResource(R.string.lock_erase_cd),
+        )
     }
 }

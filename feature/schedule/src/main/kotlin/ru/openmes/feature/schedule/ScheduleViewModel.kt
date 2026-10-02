@@ -1,6 +1,7 @@
 package ru.openmes.feature.schedule
 
 import android.os.SystemClock
+import androidx.annotation.StringRes
 import androidx.lifecycle.DefaultLifecycleObserver
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.ProcessLifecycleOwner
@@ -54,7 +55,8 @@ class ScheduleViewModel(
         val loading: Boolean = false,
         /** Ручное обновление (pull-to-refresh) — только оно крутит индикатор сверху. */
         val refreshing: Boolean = false,
-        val error: String? = null,
+        /** Ресурс сообщения об ошибке месяца — разворачивается в UI. */
+        @StringRes val error: Int? = null,
         /** Индекс по дням: пересчитывается только при обновлении кэша (см. [withMonths]), а не на каждую страницу. */
         val byDate: Map<LocalDate, List<Lesson>> = emptyMap(),
         /** Календарь дневника: праздники/каникулы/переносы. Пусто — ещё не загружен (тогда красное только воскресенье). */
@@ -229,6 +231,7 @@ class ScheduleViewModel(
         viewModelScope.launch {
             val result = runSuspendCatching {
                 val bytes = diaryRepository.getSchedulePdf(childId, monday, monday.plusDays(6))
+                // Сообщение check'а — текст проверки, без Context; UI показывает его деталью к schedule_pdf_failed.
                 check(bytes.size > 4 && bytes.decodeToString(0, 4) == "%PDF") { "Сервер вернул не PDF" }
                 withContext(Dispatchers.IO) {
                     dir.mkdirs()
@@ -290,6 +293,7 @@ class ScheduleViewModel(
         isDistance = isDistance || lesson.isDistance,
         joinUrl = joinUrl ?: lesson.joinUrl,
         module = module ?: _state.value.moduleFor(lesson)?.name,
+        // Название контрольного — строка из core:model (String), ресурс без Context недоступен.
         testName = testName ?: _state.value.testFor(lesson)?.let { it.name ?: "Контрольное занятие" },
         isMissedLesson = isMissedLesson || lesson.isMissedLesson,
         absenceReasonId = absenceReasonId ?: lesson.absenceReasonId,
@@ -389,7 +393,7 @@ class ScheduleViewModel(
                     st.copy(
                         loading = !idle,
                         refreshing = st.refreshing && !idle,
-                        error = "Сервер МЭШ временно недоступен — потяни вниз для повтора",
+                        error = R.string.schedule_server_unavailable,
                     )
                 } else {
                     // Не удалась только предзагрузка соседнего месяца — экран не ломаем.

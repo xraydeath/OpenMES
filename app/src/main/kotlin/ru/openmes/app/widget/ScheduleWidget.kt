@@ -28,7 +28,9 @@ import androidx.glance.layout.width
 import androidx.glance.text.FontWeight
 import androidx.glance.text.Text
 import androidx.glance.text.TextStyle
+import androidx.glance.LocalContext
 import ru.openmes.app.MainActivity
+import ru.openmes.app.R
 import ru.openmes.app.notify.upcomingLessons
 import ru.openmes.core.common.runSuspendCatching
 import ru.openmes.core.common.toHM
@@ -52,6 +54,7 @@ class ScheduleWidget : GlanceAppWidget() {
     @Composable
     private fun Content(day: WidgetDay?) {
         val colors = GlanceTheme.colors
+        val context = LocalContext.current
         Column(
             GlanceModifier
                 .fillMaxSize()
@@ -61,13 +64,13 @@ class ScheduleWidget : GlanceAppWidget() {
                 .clickable(actionStartActivity<MainActivity>()),
         ) {
             Text(
-                day?.let { dayTitle(it.date) } ?: "Расписание",
+                day?.let { dayTitle(context, it.date) } ?: context.getString(R.string.widget_schedule_label),
                 style = TextStyle(color = colors.primary, fontSize = 15.sp, fontWeight = FontWeight.Bold),
             )
             Spacer(GlanceModifier.height(8.dp))
             if (day == null) {
                 Text(
-                    "Нет сохранённого расписания — откройте приложение",
+                    context.getString(R.string.widget_no_saved_schedule),
                     style = TextStyle(color = colors.onSurfaceVariant, fontSize = 13.sp),
                 )
                 return@Column
@@ -106,7 +109,11 @@ class ScheduleWidget : GlanceAppWidget() {
                                         fontWeight = if (past) FontWeight.Normal else FontWeight.Medium,
                                     ),
                                 )
-                                val meta = listOfNotNull("Дистанционно".takeIf { lesson.isDistance }, lesson.room)
+                                val meta = listOfNotNull(
+                                    context.getString(R.string.lesson_distance)
+                                        .takeIf { lesson.isDistance },
+                                    lesson.room,
+                                )
                                     .joinToString(" · ")
                                 if (meta.isNotEmpty()) {
                                     Text(
@@ -155,12 +162,12 @@ internal suspend fun loadWidgetDay(): WidgetDay? {
     return WidgetDay(date, dayLessons.sortedBy { it.startTime })
 }
 
-internal fun dayTitle(date: LocalDate): String {
+internal fun dayTitle(context: Context, date: LocalDate): String {
     val today = LocalDate.now()
     val prefix = when (date) {
-        today -> "Сегодня"
-        today.plusDays(1) -> "Завтра"
+        today -> context.getString(R.string.day_today)
+        today.plusDays(1) -> context.getString(R.string.day_tomorrow)
         else -> date.dayOfWeek.toShortRu()
     }
-    return "$prefix, ${date.toRuDate()}"
+    return context.getString(R.string.day_title_with_date, prefix, date.toRuDate())
 }

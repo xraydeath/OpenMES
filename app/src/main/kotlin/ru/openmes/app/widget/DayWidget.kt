@@ -18,11 +18,12 @@ import androidx.glance.layout.Column
 import androidx.glance.layout.Spacer
 import androidx.glance.layout.fillMaxSize
 import androidx.glance.layout.padding
+import androidx.glance.LocalContext
 import androidx.glance.text.FontWeight
 import androidx.glance.text.Text
 import androidx.glance.text.TextStyle
 import ru.openmes.app.MainActivity
-import ru.openmes.core.common.pluralRu
+import ru.openmes.app.R
 import ru.openmes.core.common.toHM
 import ru.openmes.core.model.Lesson
 import java.time.Duration
@@ -43,6 +44,7 @@ class DayWidget : GlanceAppWidget() {
     @Composable
     private fun Content(day: WidgetDay?) {
         val colors = GlanceTheme.colors
+        val context = LocalContext.current
         Column(
             GlanceModifier
                 .fillMaxSize()
@@ -52,13 +54,13 @@ class DayWidget : GlanceAppWidget() {
                 .clickable(actionStartActivity<MainActivity>()),
         ) {
             Text(
-                day?.let { dayTitle(it.date) } ?: "Учебный день",
+                day?.let { dayTitle(context, it.date) } ?: context.getString(R.string.widget_day_label),
                 maxLines = 1,
                 style = TextStyle(color = colors.primary, fontSize = 12.sp, fontWeight = FontWeight.Bold),
             )
             if (day == null) {
                 Text(
-                    "Нет сохранённого расписания — откройте приложение",
+                    context.getString(R.string.widget_no_saved_schedule),
                     style = TextStyle(color = colors.onSurfaceVariant, fontSize = 12.sp),
                 )
                 return@Column
@@ -74,9 +76,9 @@ class DayWidget : GlanceAppWidget() {
             Spacer(GlanceModifier.defaultWeight())
             Text(
                 when {
-                    started && end != null -> "до ${end.toHM()}"
-                    firstOnSite != null -> "к ${firstOnSite.startTime!!.toHM()}"
-                    lessons.all { it.isDistance } -> "Дистанционно"
+                    started && end != null -> context.getString(R.string.widget_until, end.toHM())
+                    firstOnSite != null -> context.getString(R.string.widget_by, firstOnSite.startTime!!.toHM())
+                    lessons.all { it.isDistance } -> context.getString(R.string.widget_distance_only)
                     else -> "—"
                 },
                 maxLines = 1,
@@ -87,7 +89,7 @@ class DayWidget : GlanceAppWidget() {
                 ),
             )
             // «3 пары» крупнее, «6 уроков» под ними; без сдвоенных уроков — одна строка.
-            val (main, secondary) = countLines(lessons)
+            val (main, secondary) = countLines(context, lessons)
             Text(
                 main,
                 maxLines = 1,
@@ -100,12 +102,16 @@ class DayWidget : GlanceAppWidget() {
             val footer = when {
                 started -> null
                 // Дистанционные пары до первой очной — чтобы не проспать подключение.
-                first != null && first.isDistance && firstOnSite != null -> "дистанционно с ${first.startTime!!.toHM()}"
-                firstOnSite == null && first != null -> "с ${first.startTime!!.toHM()}"
+                first != null && first.isDistance && firstOnSite != null ->
+                    context.getString(R.string.widget_distance_from, first.startTime!!.toHM())
+                firstOnSite == null && first != null -> context.getString(R.string.widget_from, first.startTime!!.toHM())
                 else -> null
             }
             Text(
-                listOfNotNull(footer, end?.takeUnless { started }?.let { "до ${it.toHM()}" }).joinToString(" · "),
+                listOfNotNull(
+                    footer,
+                    end?.takeUnless { started }?.let { context.getString(R.string.widget_until, it.toHM()) },
+                ).joinToString(" · "),
                 maxLines = 2,
                 style = TextStyle(color = colors.onSurfaceVariant, fontSize = 11.sp, fontWeight = FontWeight.Medium),
             )
@@ -123,10 +129,11 @@ class DayWidgetReceiver : GlanceAppWidgetReceiver() {
 }
 
 /** («3 пары», «6 уроков»), если уроки сдвоены в пары, иначе («4 урока», null). */
-private fun countLines(lessons: List<Lesson>): Pair<String, String?> {
+private fun countLines(context: Context, lessons: List<Lesson>): Pair<String, String?> {
     val pairs = pairsCount(lessons)
-    val lessonsText = "${lessons.size} ${pluralRu(lessons.size, "урок", "урока", "уроков")}"
-    return if (pairs < lessons.size) "$pairs ${pluralRu(pairs, "пара", "пары", "пар")}" to lessonsText else lessonsText to null
+    val lessonsText = context.resources.getQuantityString(R.plurals.widget_lessons, lessons.size, lessons.size)
+    if (pairs >= lessons.size) return lessonsText to null
+    return context.resources.getQuantityString(R.plurals.widget_pairs, pairs, pairs) to lessonsText
 }
 
 /** Пара — подряд идущие уроки одного предмета с переменой не больше 10 минут. */

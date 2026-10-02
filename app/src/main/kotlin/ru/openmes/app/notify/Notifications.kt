@@ -13,6 +13,7 @@ import android.os.Build
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
+import androidx.annotation.StringRes
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withTimeoutOrNull
 import org.koin.core.context.GlobalContext
@@ -35,13 +36,13 @@ import java.time.ZoneId
 /** Каналы уведомлений и общий показ. */
 object Notifications {
 
-    enum class Channel(val id: String, val title: String, val importance: Int) {
+    enum class Channel(val id: String, @StringRes val title: Int, val importance: Int) {
         /** id исторический — канал уже создан у тех, кто включал уведомления об оценках. */
-        MARKS("data_update", "Новые оценки", NotificationManager.IMPORTANCE_DEFAULT),
-        LESSONS("lessons", "Начало пар", NotificationManager.IMPORTANCE_HIGH),
-        SCHEDULE("schedule_changes", "Изменения в расписании", NotificationManager.IMPORTANCE_HIGH),
-        EVENING("evening", "ДЗ и контрольные на завтра", NotificationManager.IMPORTANCE_DEFAULT),
-        HOMEWORK("homework", "Домашние задания", NotificationManager.IMPORTANCE_DEFAULT),
+        MARKS("data_update", R.string.channel_marks, NotificationManager.IMPORTANCE_DEFAULT),
+        LESSONS("lessons", R.string.channel_lessons, NotificationManager.IMPORTANCE_HIGH),
+        SCHEDULE("schedule_changes", R.string.channel_schedule, NotificationManager.IMPORTANCE_HIGH),
+        EVENING("evening", R.string.channel_evening, NotificationManager.IMPORTANCE_DEFAULT),
+        HOMEWORK("homework", R.string.channel_homework, NotificationManager.IMPORTANCE_DEFAULT),
     }
 
     fun canPost(context: Context): Boolean =
@@ -81,15 +82,40 @@ object Notifications {
     /** Пример уведомления из настроек (раздел «Проверка»): как выглядит каждый тип. */
     fun postSample(context: Context, kind: TestNotification) {
         val sample = when (kind) {
-            TestNotification.NewMark -> Sample(Channel.MARKS, 9001, "Математика", "Оценка 5 (вес 2) · Контрольная работа · за сегодня")
-            TestNotification.MarkChanged -> Sample(Channel.MARKS, 9002, "Математика", "Оценка изменена: 4 → 5 · за сегодня")
-            TestNotification.NewHomework -> Sample(Channel.HOMEWORK, 9003, "Информатика", "Новое задание: §12, задачи 1–5 · на завтра")
-            TestNotification.HomeworkChanged -> Sample(Channel.HOMEWORK, 9004, "Информатика", "Задание изменилось: §12, задачи 1–12 · на завтра")
-            TestNotification.ScheduleChanged -> Sample(Channel.SCHEDULE, 9005, "Расписание изменено", "Математика перенесена на 2-ю пару, кабинет 214 · завтра")
+            TestNotification.NewMark -> Sample(
+                Channel.MARKS,
+                9001,
+                R.string.sample_subject_math,
+                R.string.sample_mark_math,
+            )
+            TestNotification.MarkChanged -> Sample(
+                Channel.MARKS,
+                9002,
+                R.string.sample_subject_math,
+                R.string.sample_mark_changed,
+            )
+            TestNotification.NewHomework -> Sample(
+                Channel.HOMEWORK,
+                9003,
+                R.string.sample_subject_inf,
+                R.string.sample_homework_new,
+            )
+            TestNotification.HomeworkChanged -> Sample(
+                Channel.HOMEWORK,
+                9004,
+                R.string.sample_subject_inf,
+                R.string.sample_homework_changed,
+            )
+            TestNotification.ScheduleChanged -> Sample(
+                Channel.SCHEDULE,
+                9005,
+                R.string.sample_schedule_title,
+                R.string.sample_schedule_changed,
+            )
         }
         val builder = builder(context, sample.channel)
-            .setContentTitle(sample.title)
-            .setContentText(sample.text)
+            .setContentTitle(context.getString(sample.title))
+            .setContentText(context.getString(sample.text))
             .setGroup(sample.channel.id)
         post(context, sample.id, builder)
     }
@@ -98,8 +124,8 @@ object Notifications {
     private data class Sample(
         val channel: Channel,
         val id: Int,
-        val title: String,
-        val text: String,
+        @StringRes val title: Int,
+        @StringRes val text: Int,
     )
 
     fun openApp(context: Context): PendingIntent = PendingIntent.getActivity(
@@ -112,7 +138,13 @@ object Notifications {
     private fun ensureChannel(context: Context, channel: Channel) {
         val manager = context.getSystemService(NotificationManager::class.java)
         if (manager.getNotificationChannel(channel.id) != null) return
-        manager.createNotificationChannel(NotificationChannel(channel.id, channel.title, channel.importance))
+        manager.createNotificationChannel(
+            NotificationChannel(
+                channel.id,
+                context.getString(channel.title),
+                channel.importance,
+            ),
+        )
     }
 }
 

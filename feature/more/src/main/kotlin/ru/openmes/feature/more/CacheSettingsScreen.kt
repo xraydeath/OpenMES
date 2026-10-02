@@ -42,6 +42,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -63,6 +64,7 @@ import ru.openmes.core.designsystem.components.MesCard
 import ru.openmes.core.designsystem.components.SectionHeader
 import ru.openmes.core.designsystem.components.ShapeIcon
 import ru.openmes.core.designsystem.components.groupShape
+import ru.openmes.core.designsystem.theme.Spacing
 import ru.openmes.core.network.interceptor.CacheSection
 import ru.openmes.core.network.interceptor.CacheStats
 import ru.openmes.core.network.interceptor.OfflineCache
@@ -115,8 +117,8 @@ fun CacheSettingsScreen(viewModel: CacheSettingsViewModel) {
         AlertDialog(
             onDismissRequest = { confirmClear = false },
             icon = { Icon(Icons.Rounded.DeleteSweep, contentDescription = null) },
-            title = { Text("Очистить кэш?") },
-            text = { Text("Сохранённые данные удалятся — без сети экраны будут пустыми, пока не загрузятся заново.") },
+            title = { Text(stringResource(R.string.more_cache_clear_title)) },
+            text = { Text(stringResource(R.string.more_cache_clear_text)) },
             confirmButton = {
                 Button(
                     onClick = {
@@ -124,10 +126,12 @@ fun CacheSettingsScreen(viewModel: CacheSettingsViewModel) {
                         confirmClear = false
                     },
                     shapes = ButtonDefaults.shapes(),
-                ) { Text("Очистить") }
+                ) { Text(stringResource(R.string.more_action_clear)) }
             },
             dismissButton = {
-                TextButton(onClick = { confirmClear = false }, shapes = ButtonDefaults.shapes()) { Text("Отмена") }
+                TextButton(onClick = { confirmClear = false }, shapes = ButtonDefaults.shapes()) {
+                    Text(stringResource(R.string.more_action_cancel))
+                }
             },
         )
     }
@@ -136,8 +140,8 @@ fun CacheSettingsScreen(viewModel: CacheSettingsViewModel) {
         add { shape ->
             SwitchItem(
                 icon = Icons.Rounded.Storage,
-                title = "Кэширование",
-                subtitle = "Показывать сохранённое сразу и без сети",
+                title = stringResource(R.string.more_cache_enabled),
+                subtitle = stringResource(R.string.more_cache_enabled_sub),
                 checked = settings.cacheEnabled,
                 onCheckedChange = viewModel::setEnabled,
                 shape = shape,
@@ -147,8 +151,8 @@ fun CacheSettingsScreen(viewModel: CacheSettingsViewModel) {
             add { shape ->
                 SwitchItem(
                     icon = Icons.Rounded.Sync,
-                    title = "Обновлять в фоне",
-                    subtitle = "Примерно раз в час при наличии сети",
+                    title = stringResource(R.string.more_cache_background),
+                    subtitle = stringResource(R.string.more_cache_background_sub),
                     checked = settings.cacheBackgroundRefresh,
                     onCheckedChange = viewModel::setBackgroundRefresh,
                     shape = shape,
@@ -161,8 +165,8 @@ fun CacheSettingsScreen(viewModel: CacheSettingsViewModel) {
         val row: @Composable (Shape) -> Unit = { shape ->
             SwitchItem(
                 icon = icon,
-                title = title,
-                subtitle = subtitle,
+                title = stringResource(title),
+                subtitle = subtitle?.let { stringResource(it) },
                 checked = section in settings.cacheSections,
                 onCheckedChange = { viewModel.setSection(section, it) },
                 shape = shape,
@@ -173,12 +177,12 @@ fun CacheSettingsScreen(viewModel: CacheSettingsViewModel) {
 
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 24.dp),
+        contentPadding = PaddingValues(start = Spacing.l, end = Spacing.l, top = Spacing.s, bottom = Spacing.xl),
         verticalArrangement = Arrangement.spacedBy(GroupGap),
     ) {
         item {
             MesCard(containerColor = MaterialTheme.colorScheme.secondaryContainer) {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Spacing.l)) {
                     ShapeIcon(
                         icon = Icons.Rounded.Storage,
                         shape = MaterialShapes.Cookie9Sided.toShape(),
@@ -192,7 +196,8 @@ fun CacheSettingsScreen(viewModel: CacheSettingsViewModel) {
                             style = MaterialTheme.typography.titleLargeEmphasized,
                         )
                         Text(
-                            stats?.let { "Записей: ${it.files}" } ?: "Считаем…",
+                            stats?.let { stringResource(R.string.more_cache_records, it.files) }
+                                ?: stringResource(R.string.more_cache_counting),
                             style = MaterialTheme.typography.bodySmall,
                         )
                     }
@@ -200,43 +205,43 @@ fun CacheSettingsScreen(viewModel: CacheSettingsViewModel) {
                         onClick = { confirmClear = true },
                         enabled = (stats?.files ?: 0) > 0,
                         shapes = ButtonDefaults.shapes(),
-                    ) { Text("Очистить") }
+                    ) { Text(stringResource(R.string.more_action_clear)) }
                 }
             }
         }
 
-        item { SectionHeader("Офлайн-кэш", Modifier.padding(top = 12.dp)) }
+        item { SectionHeader(stringResource(R.string.more_cache_section), Modifier.padding(top = Spacing.m)) }
         group(main)
 
         if (settings.cacheEnabled) {
-            item { SectionHeader("Что сохранять", Modifier.padding(top = 12.dp)) }
+            item { SectionHeader(stringResource(R.string.more_cache_what), Modifier.padding(top = Spacing.m)) }
             group(sections)
 
-            item { SectionHeader("Период данных", Modifier.padding(top = 12.dp)) }
+            item { SectionHeader(stringResource(R.string.more_cache_period), Modifier.padding(top = Spacing.m)) }
             item {
+                // label у ChoiceCard — обычная функция, подписи периода разворачиваем заранее.
+                val periodLabels = mapOf(
+                    14 to stringResource(R.string.more_cache_period_2w),
+                    30 to stringResource(R.string.more_cache_period_month),
+                    90 to stringResource(R.string.more_cache_period_3m),
+                    null to stringResource(R.string.more_cache_period_all),
+                )
                 ChoiceCard(
-                    description = "Расписание, оценки, ДЗ, проходы и контрольные сохраняются, только если попадают в этот период от сегодняшнего дня",
+                    description = stringResource(R.string.more_cache_period_desc),
                     options = listOf(14, 30, 90, null),
                     selected = settings.cacheWindowDays,
                     onSelect = viewModel::setWindowDays,
-                    label = {
-                        when (it) {
-                            14 -> "±2 нед."
-                            30 -> "±месяц"
-                            90 -> "±3 мес."
-                            else -> "Всё"
-                        }
-                    },
+                    label = { periodLabels[it] ?: periodLabels.getValue(null) },
                 )
             }
         }
 
         item {
             Text(
-                "Профиль для входа сохраняется всегда: без него при запуске без сети придётся входить заново.",
+                stringResource(R.string.more_cache_profile_note),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(horizontal = 4.dp, vertical = 12.dp),
+                modifier = Modifier.padding(horizontal = Spacing.xs, vertical = Spacing.m),
             )
         }
     }
@@ -257,24 +262,25 @@ private fun ChoiceCard(
             selected = selected,
             onSelect = onSelect,
             label = label,
-            modifier = Modifier.padding(top = 12.dp),
+            modifier = Modifier.padding(top = Spacing.m),
         )
     }
 }
 
-private fun CacheSection.presentation(): Triple<ImageVector, String, String?> = when (this) {
-    CacheSection.SCHEDULE -> Triple(Icons.Rounded.CalendarMonth, "Расписание", "Уроки и их подробности; без него виджет работает только с сетью")
-    CacheSection.CALENDAR -> Triple(Icons.Rounded.EventNote, "Календарь", "Каникулы, выходные и переносы рабочих дней")
-    CacheSection.PLAN -> Triple(Icons.Rounded.Quiz, "Темы и контрольные", "Модули и темы уроков, отметки контрольных")
-    CacheSection.MARKS -> Triple(Icons.Rounded.Grade, "Оценки", "Текущие, итоговые, годовые и аттестация")
-    CacheSection.HOMEWORK -> Triple(Icons.AutoMirrored.Rounded.MenuBook, "Домашние задания", null)
-    CacheSection.ATTENDANCE -> Triple(Icons.Rounded.EventAvailable, "Посещаемость", "Пропуски, опоздания и справки ЕМИАС")
-    CacheSection.VISITS -> Triple(Icons.Rounded.DoorFront, "Проходы", "Входы и выходы через турникеты")
-    CacheSection.FOOD -> Triple(Icons.Rounded.Restaurant, "Питание", "Меню, баланс и операции по счёту")
-    CacheSection.NEWS -> Triple(Icons.Rounded.Newspaper, "Новости", null)
-    CacheSection.PORTFOLIO -> Triple(Icons.Rounded.WorkspacePremium, "Портфолио", "Олимпиады, конкурсы и награды")
-    CacheSection.PROFILE -> Triple(Icons.Rounded.Badge, "Студбилет, колледж, профориентация", null)
-    CacheSection.SESSION -> Triple(Icons.Rounded.Storage, "Профиль для входа", null)
+/** Иконка и id ресурсов подписи раздела офлайн-кэша. */
+private fun CacheSection.presentation(): Triple<ImageVector, Int, Int?> = when (this) {
+    CacheSection.SCHEDULE -> Triple(Icons.Rounded.CalendarMonth, R.string.more_cache_sec_schedule, R.string.more_cache_sec_schedule_sub)
+    CacheSection.CALENDAR -> Triple(Icons.Rounded.EventNote, R.string.more_cache_sec_calendar, R.string.more_cache_sec_calendar_sub)
+    CacheSection.PLAN -> Triple(Icons.Rounded.Quiz, R.string.more_cache_sec_plan, R.string.more_cache_sec_plan_sub)
+    CacheSection.MARKS -> Triple(Icons.Rounded.Grade, R.string.more_cache_sec_marks, R.string.more_cache_sec_marks_sub)
+    CacheSection.HOMEWORK -> Triple(Icons.AutoMirrored.Rounded.MenuBook, R.string.more_cache_sec_homework, null)
+    CacheSection.ATTENDANCE -> Triple(Icons.Rounded.EventAvailable, R.string.more_cache_sec_attendance, R.string.more_cache_sec_attendance_sub)
+    CacheSection.VISITS -> Triple(Icons.Rounded.DoorFront, R.string.more_cache_sec_visits, R.string.more_cache_sec_visits_sub)
+    CacheSection.FOOD -> Triple(Icons.Rounded.Restaurant, R.string.more_cache_sec_food, R.string.more_cache_sec_food_sub)
+    CacheSection.NEWS -> Triple(Icons.Rounded.Newspaper, R.string.more_cache_sec_news, null)
+    CacheSection.PORTFOLIO -> Triple(Icons.Rounded.WorkspacePremium, R.string.more_cache_sec_portfolio, R.string.more_cache_sec_portfolio_sub)
+    CacheSection.PROFILE -> Triple(Icons.Rounded.Badge, R.string.more_cache_sec_profile, null)
+    CacheSection.SESSION -> Triple(Icons.Rounded.Storage, R.string.more_cache_sec_session, null)
 }
 
 private fun formatBytes(bytes: Long): String = when {

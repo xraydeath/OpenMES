@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!--
+        Общие состояния экранов. Живут здесь, а не в app/strings.xml: designsystem —
+        нижний в зависимостях, app зависит от него, поэтому app-R из designsystem не виден.
+        Заодно строки не дублируются в каждом фича-модуле — все берут их отсюда.
+    -->
+
+    <!-- Загрузка -->
+    <string name="ds_loading">Загрузка…</string>
+
+    <!-- Док -->
+    <string name="dock_unread_cd">Уведомления, есть непрочитанные</string>
+
+    <!-- Ошибка -->
+    <string name="ds_error_title">Что-то пошло не так</string>
+    <string name="ds_error_subtitle">Попробуйте ещё раз</string>
+    <string name="ds_error_retry">Повторить</string>
+</resources>

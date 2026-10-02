@@ -1,5 +1,6 @@
 package ru.openmes.feature.schedule
 
+import androidx.annotation.StringRes
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
@@ -9,6 +10,7 @@ import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -40,7 +42,6 @@ import androidx.compose.material.icons.rounded.Quiz
 import androidx.compose.material3.IconButton
 import android.content.Context
 import android.content.Intent
-import android.widget.Toast
 import androidx.core.content.FileProvider
 import ru.openmes.core.model.AbsenceReason
 import ru.openmes.core.model.DayInfo
@@ -53,6 +54,7 @@ import androidx.compose.material3.LoadingIndicator
 import androidx.compose.material3.MaterialShapes
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
@@ -90,12 +92,15 @@ import ru.openmes.core.designsystem.components.EmptyState
 import ru.openmes.core.designsystem.components.ErrorState
 import ru.openmes.core.designsystem.components.GroupGap
 import ru.openmes.core.designsystem.components.LoadingState
+import ru.openmes.core.designsystem.components.mesDockReservedHeight
+import ru.openmes.core.designsystem.components.mesFadeTop
 import ru.openmes.core.designsystem.components.MarkBadge
 import ru.openmes.core.designsystem.components.MesCard
 import ru.openmes.core.designsystem.components.MesListItem
 import ru.openmes.core.designsystem.components.MesPullToRefreshBox
 import ru.openmes.core.designsystem.components.ScrollableFill
 import ru.openmes.core.designsystem.components.WithMarkWeight
+import ru.openmes.core.designsystem.components.mesSnackbar
 import ru.openmes.core.designsystem.components.SectionHeader
 import ru.openmes.core.designsystem.components.ShapeIcon
 import ru.openmes.core.designsystem.components.StatusPill
@@ -104,6 +109,7 @@ import ru.openmes.core.designsystem.components.markShape
 import ru.openmes.core.designsystem.components.markTone
 import ru.openmes.core.designsystem.components.openUrl
 import ru.openmes.core.designsystem.components.WeekBar
+import ru.openmes.core.designsystem.theme.Spacing
 import ru.openmes.core.designsystem.components.rememberDayPager
 import ru.openmes.core.designsystem.components.rememberShortSwipeFling
 import ru.openmes.core.model.DayKind
@@ -116,6 +122,10 @@ import java.time.LocalTime
 import java.time.temporal.ChronoUnit
 import java.time.temporal.TemporalAdjusters
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.res.stringResource
+import ru.openmes.feature.schedule.R
 
 /**
  * Текущие дата и время, обновляемые на границе каждой минуты, пока экран на переднем плане,
@@ -179,7 +189,13 @@ fun ScheduleScreen(viewModel: ScheduleViewModel) {
     LaunchedEffect(viewModel) {
         viewModel.pdfResults.collect { result ->
             result.onSuccess { file -> context.openPdf(file) }
-                .onFailure { Toast.makeText(context, "Не удалось получить PDF: ${it.message}", Toast.LENGTH_LONG).show() }
+                .onFailure {
+                    // Внутри LaunchedEffect composable-вызовов нет — берём текст через Context.
+                    mesSnackbar.show(
+                        errorText(context, R.string.schedule_pdf_failed, it.message),
+                        duration = SnackbarDuration.Long,
+                    )
+                }
         }
     }
     fun exportPdf(date: LocalDate) {
@@ -206,14 +222,20 @@ fun ScheduleScreen(viewModel: ScheduleViewModel) {
             val selectedMonthShown = YearMonth.from(state.selectedDate) in state.months
             when {
                 state.error != null && !selectedMonthShown ->
-                    ScrollableFill { ErrorState(onRetry = viewModel::refresh, details = state.error) }
+                    ScrollableFill {
+                        ErrorState(onRetry = viewModel::refresh, details = state.error?.let { stringResource(it) })
+                    }
                 else -> Column(Modifier.fillMaxSize()) {
                     if (state.error != null) RefreshErrorBanner(onRetry = viewModel::refresh)
                     HorizontalPager(
                         state = pagerState,
                         flingBehavior = rememberShortSwipeFling(pagerState),
                         // Без key — ключи вызывали ANR (грабли из OctoDiary-kt).
-                        modifier = Modifier.fillMaxSize(),
+                        // mesFadeTop на пейджере, а не на списке внутри страницы: полоса тогда
+                        // не уезжает вместе со страницей при свайпе по дням.
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .mesFadeTop(),
                     ) { page ->
                         val date = days[page]
                         DayPage(
@@ -248,22 +270,30 @@ private fun RefreshErrorBanner(onRetry: () -> Unit) {
         contentColor = MaterialTheme.colorScheme.onErrorContainer,
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 4.dp),
+            .padding(horizontal = Spacing.l, vertical = Spacing.xs),
     ) {
         Row(
-            Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
+            Modifier.padding(horizontal = Spacing.l, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            horizontalArrangement = Arrangement.spacedBy(Spacing.m),
         ) {
             Icon(Icons.Rounded.CloudOff, contentDescription = null, modifier = Modifier.size(20.dp))
             Text(
-                "Не удалось обновить — показано сохранённое. Нажмите, чтобы повторить",
+                stringResource(R.string.schedule_refresh_failed_banner),
                 style = MaterialTheme.typography.bodyMedium,
                 modifier = Modifier.weight(1f),
             )
         }
     }
 }
+
+/**
+ * Текст ошибки: строка [textRes] сама по себе, а с деталью от сети/сервера —
+ * одной строкой через [R.string.schedule_error_detail].
+ */
+private fun errorText(context: Context, @StringRes textRes: Int, detail: String?): String =
+    detail?.let { context.getString(R.string.schedule_error_detail, context.getString(textRes), it) }
+        ?: context.getString(textRes)
 
 
 // ---------------------------------------------------------------------------
@@ -287,22 +317,27 @@ private fun DayPage(
 ) {
     when {
         loading -> LoadingState()
-        lessons.isEmpty() -> Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp)) {
+        lessons.isEmpty() -> Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = Spacing.l)) {
             DayHeader(date, lessons.size, pdfBusy = pdfBusy, onPdf = onPdf)
             EmptyState(
                 icon = Icons.Rounded.EventBusy,
-                title = "Уроков нет",
+                title = stringResource(R.string.schedule_empty_title),
                 subtitle = dayInfo?.note ?: when (dayKind) {
-                    DayKind.VACATION -> dayInfo?.title ?: "Каникулы"
-                    DayKind.HOLIDAY -> "Выходной"
-                    DayKind.WORKDAY -> dayInfo?.title?.takeUnless { it.isTheory() } ?: "Занятий в этот день нет"
+                    DayKind.VACATION -> dayInfo?.title ?: stringResource(R.string.schedule_day_vacation)
+                    DayKind.HOLIDAY -> stringResource(R.string.schedule_day_off)
+                    DayKind.WORKDAY -> dayInfo?.title?.takeUnless { it.isTheory() }
+                        ?: stringResource(R.string.schedule_day_no_lessons)
                 },
             )
         }
 
         else -> LazyColumn(
             modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 24.dp),
+            contentPadding = PaddingValues(
+                start = Spacing.l,
+                end = Spacing.l,
+                bottom = Spacing.xl + mesDockReservedHeight(),
+            ),
         ) {
             item(key = "day_header") { DayHeader(date, lessons.size, pdfBusy = pdfBusy, onPdf = onPdf) }
             // Перенос или особый период (практика) — плашкой над уроками.
@@ -314,7 +349,7 @@ private fun DayPage(
                         icon = Icons.Rounded.EventNote,
                         containerColor = MaterialTheme.colorScheme.tertiaryContainer,
                         contentColor = MaterialTheme.colorScheme.onTertiaryContainer,
-                        modifier = Modifier.padding(bottom = 12.dp),
+                        modifier = Modifier.padding(bottom = Spacing.m),
                     )
                 }
             }
@@ -331,7 +366,7 @@ private fun DayHeader(date: LocalDate, count: Int, pdfBusy: Boolean, onPdf: () -
     Row(
         Modifier
             .fillMaxWidth()
-            .padding(top = 8.dp, bottom = 12.dp),
+            .padding(top = Spacing.s, bottom = Spacing.m),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(Modifier.weight(1f)) {
@@ -340,7 +375,11 @@ private fun DayHeader(date: LocalDate, count: Int, pdfBusy: Boolean, onPdf: () -
                 style = MaterialTheme.typography.titleLargeEmphasized,
             )
             Text(
-                "${date.dayOfWeek.toFullRu().replaceFirstChar { it.uppercase() }}, ${date.year}",
+                stringResource(
+                    R.string.schedule_day_subtitle,
+                    date.dayOfWeek.toFullRu().replaceFirstChar { it.uppercase() },
+                    date.year,
+                ),
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -356,7 +395,7 @@ private fun DayHeader(date: LocalDate, count: Int, pdfBusy: Boolean, onPdf: () -
             if (pdfBusy) {
                 LoadingIndicator(Modifier.size(24.dp))
             } else {
-                Icon(Icons.Rounded.PictureAsPdf, contentDescription = "Расписание недели в PDF")
+                Icon(Icons.Rounded.PictureAsPdf, contentDescription = stringResource(R.string.schedule_pdf_cd))
             }
         }
     }
@@ -372,12 +411,12 @@ private fun Context.openPdf(file: File) {
     val share = Intent.createChooser(
         Intent(Intent.ACTION_SEND).setType("application/pdf").putExtra(Intent.EXTRA_STREAM, uri)
             .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION),
-        "Расписание",
+        getString(R.string.schedule_pdf_share_title),
     )
     // Просмотрщика PDF может не быть — тогда хотя бы поделиться файлом.
     runCatching { startActivity(view) }
         .recoverCatching { startActivity(share) }
-        .onFailure { Toast.makeText(this, "Нет приложения для PDF", Toast.LENGTH_LONG).show() }
+        .onFailure { mesSnackbar.show(getString(R.string.schedule_pdf_no_app), duration = SnackbarDuration.Long) }
 }
 
 /** Слитые карточки уроков с перерывами между ними (стиль OctoDiary DayItem). */
@@ -455,12 +494,12 @@ private fun BreakRow(minutes: Long, shape: Shape) {
         contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
     ) {
         Row(
-            Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+            Modifier.padding(horizontal = Spacing.l, vertical = Spacing.s),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
+            horizontalArrangement = Arrangement.spacedBy(Spacing.s, Alignment.CenterHorizontally),
         ) {
             Icon(Icons.Rounded.Coffee, contentDescription = null, modifier = Modifier.size(16.dp))
-            Text("Перемена $minutes мин", style = MaterialTheme.typography.labelLarge)
+            Text(stringResource(R.string.schedule_break, minutes), style = MaterialTheme.typography.labelLarge)
         }
     }
 }
@@ -493,7 +532,7 @@ private fun LessonCard(
         shape = shape,
         containerColor = container,
         contentColor = content,
-        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 14.dp),
+        contentPadding = PaddingValues(horizontal = Spacing.l, vertical = 14.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             // Номер урока в фигуре (только PLAN)
@@ -511,12 +550,12 @@ private fun LessonCard(
                     }
                 }
             }
-            Spacer(Modifier.width(12.dp))
+            Spacer(Modifier.width(Spacing.m))
 
             Column(Modifier.weight(1f)) {
                 if (current) {
                     Text(
-                        "СЕЙЧАС",
+                        stringResource(R.string.schedule_now),
                         style = MaterialTheme.typography.labelSmallEmphasized,
                         color = colors.primary,
                     )
@@ -529,7 +568,7 @@ private fun LessonCard(
                 )
                 val meta = listOfNotNull(
                     lesson.lessonForm?.trim(),
-                    "Дистанционно".takeIf { distance },
+                    stringResource(R.string.schedule_distance).takeIf { distance },
                     lesson.room,
                 ).joinToString(" · ")
                 if (meta.isNotEmpty()) {
@@ -538,7 +577,7 @@ private fun LessonCard(
             }
 
             // Время + оценки + ДЗ
-            Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(Spacing.xs)) {
                 Text(
                     buildString {
                         lesson.startTime?.let { append(it.toHM()) }
@@ -549,14 +588,14 @@ private fun LessonCard(
                 )
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(Spacing.xs),
                 ) {
                     if (status != null) DiseaseStatusIcon(status)
                     if (missed) MiniAbsence(missedReasonId)
                     if (test) {
                         Icon(
                             Icons.Rounded.Quiz,
-                            contentDescription = "Контрольное занятие",
+                            contentDescription = stringResource(R.string.schedule_test_cd),
                             modifier = Modifier.size(16.dp),
                             tint = colors.error,
                         )
@@ -564,7 +603,7 @@ private fun LessonCard(
                     if (distance) {
                         Icon(
                             Icons.Rounded.Videocam,
-                            contentDescription = "Дистанционное занятие",
+                            contentDescription = stringResource(R.string.schedule_distance_lesson),
                             modifier = Modifier.size(16.dp),
                             tint = secondary,
                         )
@@ -572,7 +611,7 @@ private fun LessonCard(
                     if (lesson.homework != null) {
                         Icon(
                             Icons.AutoMirrored.Rounded.MenuBook,
-                            contentDescription = "Есть ДЗ",
+                            contentDescription = stringResource(R.string.schedule_homework_cd),
                             modifier = Modifier.size(16.dp),
                             tint = secondary,
                         )
@@ -594,8 +633,16 @@ private fun LessonCard(
 @Composable
 private fun DiseaseStatusIcon(status: String) {
     val (container, content, label) = when (status) {
-        "EXEMPT" -> Triple(MaterialTheme.colorScheme.tertiaryContainer, MaterialTheme.colorScheme.onTertiaryContainer, "Освобождение")
-        "SICK", "SICK_WITH_INFECTION" -> Triple(MaterialTheme.colorScheme.errorContainer, MaterialTheme.colorScheme.onErrorContainer, "Болезнь")
+        "EXEMPT" -> Triple(
+            MaterialTheme.colorScheme.tertiaryContainer,
+            MaterialTheme.colorScheme.onTertiaryContainer,
+            stringResource(R.string.schedule_status_exempt),
+        )
+        "SICK", "SICK_WITH_INFECTION" -> Triple(
+            MaterialTheme.colorScheme.errorContainer,
+            MaterialTheme.colorScheme.onErrorContainer,
+            stringResource(R.string.schedule_status_sick),
+        )
         else -> Triple(MaterialTheme.colorScheme.surfaceContainerHighest, MaterialTheme.colorScheme.onSurfaceVariant, status)
     }
     Surface(modifier = Modifier.size(22.dp), shape = CircleShape, color = container, contentColor = content) {
@@ -625,6 +672,9 @@ private fun MiniMark(value: String, weight: Int?) {
 @Composable
 private fun MiniAbsence(reasonId: Int?) {
     val reason = AbsenceReason.byId(reasonId)?.title
+    // semantics-лямбда не composable — текст описания разворачиваем здесь.
+    val absenceCd = reason?.let { stringResource(R.string.schedule_absence_cd, it) }
+        ?: stringResource(R.string.schedule_absence_cd_short)
     Surface(
         modifier = Modifier.size(26.dp),
         shape = MaterialShapes.Circle.toShape(),
@@ -633,11 +683,12 @@ private fun MiniAbsence(reasonId: Int?) {
     ) {
         Box(contentAlignment = Alignment.Center) {
             Text(
-                "Н",
+                stringResource(R.string.schedule_absence_mark),
                 style = MaterialTheme.typography.labelMediumEmphasized,
                 maxLines = 1,
                 modifier = Modifier.semantics {
-                    contentDescription = if (reason != null) "Пропуск: $reason" else "Пропуск"
+                    // Причина от сервера — в описание, сама буква «Н» её не заменяет.
+                    contentDescription = absenceCd
                 },
             )
         }
@@ -654,7 +705,7 @@ private fun SheetHandle() {
     Box(
         Modifier
             .fillMaxWidth()
-            .padding(top = 12.dp, bottom = 12.dp),
+            .padding(top = Spacing.m, bottom = Spacing.m),
         contentAlignment = Alignment.Center,
     ) {
         Box(
@@ -665,15 +716,27 @@ private fun SheetHandle() {
     }
 }
 
+/**
+ * Плашка статуса занятия, собранная заранее, а не нарисованная сразу: статусов у урока
+ * несколько, и перечислить их удобно списком, который потом раскладывается по ряду.
+ */
+private class StatusPillData(
+    val text: String,
+    val icon: ImageVector,
+    val container: Color,
+    val content: Color,
+)
+
 @Composable
 private fun LessonDetailsSheet(details: LessonDetails, loading: Boolean) {
     val context = LocalContext.current
     val info = listOfNotNull(
-        details.module?.let { Triple(Icons.Rounded.EventNote, "Модуль / тема", it) },
-        details.teacherName?.let { Triple(Icons.Rounded.Person, "Преподаватель", it) },
-        details.room?.let { Triple(Icons.Rounded.MeetingRoom, "Кабинет", it) },
-        details.building?.let { Triple(Icons.Rounded.Apartment, "Корпус", it) },
-        details.comment?.takeIf { it.isNotBlank() }?.let { Triple(Icons.AutoMirrored.Rounded.Comment, "Комментарий", it) },
+        details.module?.let { Triple(Icons.Rounded.EventNote, stringResource(R.string.schedule_detail_module), it) },
+        details.teacherName?.let { Triple(Icons.Rounded.Person, stringResource(R.string.schedule_detail_teacher), it) },
+        details.room?.let { Triple(Icons.Rounded.MeetingRoom, stringResource(R.string.schedule_detail_room), it) },
+        details.building?.let { Triple(Icons.Rounded.Apartment, stringResource(R.string.schedule_detail_building), it) },
+        details.comment?.takeIf { it.isNotBlank() }
+            ?.let { Triple(Icons.AutoMirrored.Rounded.Comment, stringResource(R.string.schedule_detail_comment), it) },
     )
 
     // Шторка раскрыта полностью: гасим остаток жеста вверх, который содержимое
@@ -697,14 +760,14 @@ private fun LessonDetailsSheet(details: LessonDetails, loading: Boolean) {
                 // прокрутки гасится раньше, чем его получит шторка.
                 .nestedScroll(absorbLeftoverUp)
                 .verticalScroll(rememberScrollState(), overscrollEffect = null)
-                .padding(horizontal = 16.dp)
-                .padding(bottom = 24.dp),
+                .padding(horizontal = Spacing.l)
+                .padding(bottom = Spacing.xl),
             verticalArrangement = Arrangement.spacedBy(GroupGap),
         ) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(16.dp),
-                modifier = Modifier.padding(bottom = 12.dp),
+                horizontalArrangement = Arrangement.spacedBy(Spacing.l),
+                modifier = Modifier.padding(bottom = Spacing.m),
             ) {
                 ShapeIcon(
                     icon = Icons.Rounded.School,
@@ -723,62 +786,97 @@ private fun LessonDetailsSheet(details: LessonDetails, loading: Boolean) {
                 if (loading) LoadingIndicator(Modifier.size(40.dp))
             }
 
-            // Статус здоровья
-            details.diseaseStatusType?.let { status ->
-                val (text, container, content) = when (status) {
-                    "EXEMPT" -> Triple("Освобождение", MaterialTheme.colorScheme.tertiaryContainer, MaterialTheme.colorScheme.onTertiaryContainer)
-                    "SICK" -> Triple("Болезнь", MaterialTheme.colorScheme.errorContainer, MaterialTheme.colorScheme.onErrorContainer)
-                    "SICK_WITH_INFECTION" -> Triple("Болезнь (инфекция)", MaterialTheme.colorScheme.errorContainer, MaterialTheme.colorScheme.onErrorContainer)
-                    else -> Triple(status, MaterialTheme.colorScheme.surfaceContainerHigh, MaterialTheme.colorScheme.onSurfaceVariant)
+            // Плашки статусов — болезнь, пропуск, дистанционное занятие, контрольная.
+// Раньше каждая стояла своей строкой, и урок с двумя-тремя статусами растягивался
+// на пол-экрана: между однородными плашками отдельная строка ничего не добавляет.
+// Теперь это один ряд, а не влезшие переносятся ниже — [FlowRow] сам решает,
+// где кончится место.
+            val statusPills = buildList {
+                // Статус здоровья
+                details.diseaseStatusType?.let { status ->
+                    val (text, container, content) = when (status) {
+                        "EXEMPT" -> Triple(
+                            stringResource(R.string.schedule_status_exempt),
+                            MaterialTheme.colorScheme.tertiaryContainer,
+                            MaterialTheme.colorScheme.onTertiaryContainer,
+                        )
+                        "SICK" -> Triple(
+                            stringResource(R.string.schedule_status_sick),
+                            MaterialTheme.colorScheme.errorContainer,
+                            MaterialTheme.colorScheme.onErrorContainer,
+                        )
+                        "SICK_WITH_INFECTION" -> Triple(
+                            stringResource(R.string.schedule_status_sick_infection),
+                            MaterialTheme.colorScheme.errorContainer,
+                            MaterialTheme.colorScheme.onErrorContainer,
+                        )
+                        else -> Triple(
+                            status,
+                            MaterialTheme.colorScheme.surfaceContainerHigh,
+                            MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    add(StatusPillData(text, Icons.Rounded.Healing, container, content))
                 }
-                StatusPill(
-                    text = text,
-                    icon = Icons.Rounded.Healing,
-                    containerColor = container,
-                    contentColor = content,
-                    modifier = Modifier.padding(bottom = 8.dp),
-                )
+                // Пропуск: преподаватель отметил отсутствие на занятии
+                if (details.isMissedLesson) {
+                    val reason = AbsenceReason.byId(details.absenceReasonId)?.title
+                    add(
+                        StatusPillData(
+                            text = reason?.let { stringResource(R.string.schedule_missed_reason, it) }
+                                ?: stringResource(R.string.schedule_missed),
+                            icon = Icons.Rounded.EventBusy,
+                            container = MaterialTheme.colorScheme.errorContainer,
+                            content = MaterialTheme.colorScheme.onErrorContainer,
+                        ),
+                    )
+                }
+                // Дистанционное занятие
+                if (details.isDistance) {
+                    add(
+                        StatusPillData(
+                            text = stringResource(R.string.schedule_distance_lesson),
+                            icon = Icons.Rounded.Videocam,
+                            container = MaterialTheme.colorScheme.secondaryContainer,
+                            content = MaterialTheme.colorScheme.onSecondaryContainer,
+                        ),
+                    )
+                }
+                details.testName?.let { name ->
+                    add(
+                        StatusPillData(
+                            text = name,
+                            icon = Icons.Rounded.Quiz,
+                            container = MaterialTheme.colorScheme.errorContainer,
+                            content = MaterialTheme.colorScheme.onErrorContainer,
+                        ),
+                    )
+                }
             }
-
-            // Пропуск: преподаватель отметил отсутствие на занятии
-            if (details.isMissedLesson) {
-                val reason = AbsenceReason.byId(details.absenceReasonId)?.title
-                StatusPill(
-                    text = "Не был${reason?.let { " · $it" }.orEmpty()}",
-                    icon = Icons.Rounded.EventBusy,
-                    containerColor = MaterialTheme.colorScheme.errorContainer,
-                    contentColor = MaterialTheme.colorScheme.onErrorContainer,
-                    modifier = Modifier.padding(bottom = 8.dp),
-                )
-            }
-
-            // Дистанционное занятие: плашка и кнопка подключения
-            if (details.isDistance) {
-                StatusPill(
-                    text = "Дистанционное занятие",
-                    icon = Icons.Rounded.Videocam,
-                    containerColor = MaterialTheme.colorScheme.secondaryContainer,
-                    contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
-                    modifier = Modifier.padding(bottom = 8.dp),
-                )
-            }
-            details.testName?.let { name ->
-                StatusPill(
-                    text = name,
-                    icon = Icons.Rounded.Quiz,
-                    containerColor = MaterialTheme.colorScheme.errorContainer,
-                    contentColor = MaterialTheme.colorScheme.onErrorContainer,
-                    modifier = Modifier.padding(bottom = 8.dp),
-                )
+            if (statusPills.isNotEmpty()) {
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(Spacing.s),
+                    verticalArrangement = Arrangement.spacedBy(Spacing.s),
+                    modifier = Modifier.padding(bottom = Spacing.s),
+                ) {
+                    statusPills.forEach { pill ->
+                        StatusPill(
+                            text = pill.text,
+                            icon = pill.icon,
+                            containerColor = pill.container,
+                            contentColor = pill.content,
+                        )
+                    }
+                }
             }
             details.joinUrl?.let { url ->
                 FilledTonalButton(
                     onClick = { context.openUrl(url) },
-                    modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
+                    modifier = Modifier.fillMaxWidth().padding(bottom = Spacing.s),
                 ) {
                     Icon(Icons.Rounded.Videocam, contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
                     Spacer(Modifier.width(ButtonDefaults.IconSpacing))
-                    Text("Подключиться к занятию")
+                    Text(stringResource(R.string.schedule_join_lesson))
                 }
             }
 
@@ -795,12 +893,12 @@ private fun LessonDetailsSheet(details: LessonDetails, loading: Boolean) {
             // Домашнее задание
             details.homework?.takeIf { it.isNotBlank() }?.let { hw ->
                 SectionHeader(
-                    "Домашнее задание",
-                    modifier = Modifier.padding(top = 8.dp),
+                    stringResource(R.string.schedule_homework_section),
+                    modifier = Modifier.padding(top = Spacing.s),
                     trailing = if (details.homeworkDone) {
                         {
                             StatusPill(
-                                "Выполнено",
+                                stringResource(R.string.schedule_homework_done),
                                 icon = Icons.Rounded.Check,
                                 containerColor = MaterialTheme.colorScheme.primaryContainer,
                                 contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
@@ -817,8 +915,8 @@ private fun LessonDetailsSheet(details: LessonDetails, loading: Boolean) {
 
             // Оценки
             if (details.marks.isNotEmpty()) {
-                SectionHeader("Оценки", Modifier.padding(top = 8.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                SectionHeader(stringResource(R.string.schedule_marks_section), Modifier.padding(top = Spacing.s))
+                Row(horizontalArrangement = Arrangement.spacedBy(Spacing.s)) {
                     details.marks.forEach { mark -> MarkBadge(mark.value, large = true, weight = mark.weight) }
                 }
             }

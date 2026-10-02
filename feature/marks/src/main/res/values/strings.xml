@@ -1,0 +1,99 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Вкладки и сортировка -->
+    <string name="marks_tab_by_date">По дате</string>
+    <string name="marks_tab_by_subject">Предметы</string>
+    <string name="marks_tab_gradebook">Зачётка</string>
+    <string name="marks_tab_annual">Годовые</string>
+    <string name="marks_sort_by_average">По среднему баллу</string>
+    <string name="marks_sort_by_updated">По дате последней оценки</string>
+    <string name="marks_sort_alphabetical">По алфавиту А-Я</string>
+    <string name="marks_sort_cd">Сортировка</string>
+
+    <!-- Состояния экрана и сообщения -->
+    <string name="marks_refresh_failed">Не удалось обновить оценки</string>
+    <string name="marks_refresh_failed_detail">Не удалось обновить оценки: %1$s</string>
+    <string name="marks_empty_title">Оценок пока нет</string>
+    <string name="marks_empty_subtitle">Здесь появятся отметки по предметам</string>
+    <string name="marks_by_date_empty_title">Оценок за месяц нет</string>
+    <string name="marks_by_date_empty_subtitle">Показаны оценки за последние 4 недели</string>
+    <string name="marks_by_date_footer">Показаны оценки за последний месяц</string>
+    <string name="marks_no_date">Без даты</string>
+
+    <!-- Вкладка «Предметы» -->
+    <string name="marks_period_finals">Итоговые</string>
+    <string name="marks_subject_marks_calc">%1$s · калькулятор</string>
+    <string name="marks_finals_subject">Предмет</string>
+    <string name="marks_finals_year_cd">Год</string>
+    <string name="marks_final_cd">Итоговая</string>
+
+    <!-- Вкладка «Зачётка» -->
+    <string name="marks_gradebook_error">Не удалось загрузить зачётку</string>
+    <string name="marks_gradebook_loading">Загружаем зачётку…</string>
+    <string name="marks_gradebook_empty_title">Зачётка пуста</string>
+    <string name="marks_gradebook_empty_subtitle">Здесь появятся итоговые аттестации по курсам</string>
+    <string name="marks_semester_number">%1$d семестр</string>
+    <string name="marks_form_exam">Экзамены</string>
+    <string name="marks_form_test">Дифференцированные зачёты</string>
+    <string name="marks_form_practice">Практика</string>
+    <string name="marks_hours_short">%1$d ч.</string>
+    <string name="marks_theme">Тема: %1$s</string>
+    <string name="marks_debt">Долг</string>
+
+    <!-- Вкладка «Годовые» -->
+    <string name="marks_annual_error">Не удалось загрузить годовые оценки</string>
+    <string name="marks_annual_loading">Загружаем годовые оценки…</string>
+    <string name="marks_annual_empty_title">Годовых оценок нет</string>
+    <string name="marks_annual_empty_subtitle">Здесь появятся итоговые оценки за учебные годы</string>
+    <string name="marks_academic_year">%1$s учебный год</string>
+    <string name="marks_study_year">%1$d-й год обучения</string>
+    <string name="marks_average_short">Средний %1$s</string>
+    <string name="marks_year_short">%1$d год</string>
+
+    <!-- Детали оценки -->
+    <string name="marks_control_form">Форма контроля</string>
+    <string name="marks_teacher">Учитель</string>
+    <string name="marks_date">Дата</string>
+    <string name="marks_lesson_topic">Тема урока</string>
+    <string name="marks_weight">Вес %1$d</string>
+    <string name="marks_comment">Комментарий</string>
+    <string name="marks_criteria">Критерии</string>
+    <string name="marks_class_results">Оценки класса · %1$d чел.</string>
+
+    <!-- Калькулятор оценок -->
+    <string name="marks_calc_title">Калькулятор оценок</string>
+    <string name="marks_calc_reset_cd">Сбросить</string>
+    <string name="marks_calc_add_cd">Добавить</string>
+    <string name="marks_calc_hint_non_numeric">Уберите нечисловые оценки (тапом), чтобы посчитать средний</string>
+    <string name="marks_calc_hint_empty">Оценок нет — добавьте их ниже</string>
+    <string name="marks_calc_hint_tap">Тап по оценке — убрать её</string>
+    <string name="marks_calc_average_label">Средний балл</string>
+    <string name="marks_calc_was">было %1$s</string>
+    <string name="marks_calc_total_label">итог</string>
+    <string name="marks_calc_mode_keyboard">Клавиатура</string>
+    <string name="marks_calc_mode_buttons">Кнопки</string>
+    <string name="marks_calc_input_label">Добавить оценки</string>
+    <string name="marks_calc_input_hint">Через пробел, вес через ^: 5 4^2 3</string>
+    <string name="marks_calc_clear_all">Очистить все</string>
+    <string name="marks_calc_goals_title">Что нужно</string>
+    <string name="marks_calc_need_count">%1$d × %2$d</string>
+    <string name="marks_calc_need_target">до «%1$d»</string>
+    <string name="marks_calc_or"> или </string>
+    <string name="marks_calc_unreachable">больше %1$d оценок — недостижимо</string>
+    <string name="marks_calc_reserve_drops">Любая двойка опустит итог до «%1$d»</string>
+    <string name="marks_calc_reserve_never">«%1$d» не опустится даже от %2$d двоек</string>
+    <string name="marks_calc_reserve_count">«%1$d» выдержит двоек: %2$d</string>
+    <string name="marks_calc_rules_hint">Оценки веса 1. Пороги: %1$s</string>
+    <string name="marks_calc_edit">Изменить</string>
+
+    <!-- Пороги округления -->
+    <string name="marks_calc_thresholds_title">Пороги округления</string>
+    <string name="marks_calc_thresholds_description">С какого среднего балла ставится итоговая. В колледжах бывает по-разному — уточните у куратора.</string>
+    <string name="marks_calc_rules_describe">«5» от %1$s, «4» от %2$s, «3» от %3$s</string>
+    <string name="marks_calc_threshold_five">«5» от</string>
+    <string name="marks_calc_threshold_four">«4» от</string>
+    <string name="marks_calc_threshold_three">«3» от</string>
+    <string name="marks_calc_thresholds_error">Пороги от 2 до 5, и «5» &gt; «4» &gt; «3»</string>
+    <string name="marks_calc_save">Сохранить</string>
+    <string name="marks_calc_cancel">Отмена</string>
+</resources>

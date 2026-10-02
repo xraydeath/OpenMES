@@ -1,9 +1,44 @@
 package ru.openmes.app.notify
 
+import android.content.Context
+import androidx.annotation.StringRes
+import ru.openmes.app.R
 import ru.openmes.core.common.toHM
 import ru.openmes.core.model.Lesson
 import java.time.LocalDate
 import java.time.LocalTime
+
+/**
+ * Тексты описаний изменений расписания.
+ *
+ * Сравнение снимков — чистая функция без Android, поэтому тексты в неё передаются
+ * снаружи: в приложении это ресурсы ([DiffTexts.of]), в юнит-тестах — литералы.
+ */
+/** Фраза описания изменения. Идентификатор, а не строка: текст берётся из ресурсов. */
+enum class DiffText(@StringRes val res: Int) {
+    REPLACED(R.string.diff_replaced),
+    CANCELLED(R.string.diff_cancelled),
+    ADDED(R.string.diff_added),
+    MOVED(R.string.diff_moved),
+    NOW_DISTANCE(R.string.diff_now_distance),
+    NOW_ONLINE(R.string.diff_now_online),
+    ROOM(R.string.diff_room),
+    TEACHER(R.string.diff_teacher),
+    SUMMARY(R.string.diff_summary),
+    WHERE_DISTANCE(R.string.diff_where_distance),
+    WHERE_ROOM(R.string.diff_where_room),
+}
+
+/** Подстановка фраз описания изменений: в приложении — ресурсы, в тестах — литералы. */
+fun interface DiffTexts {
+    fun text(phrase: DiffText, vararg args: Any): String
+
+    companion object {
+        fun of(context: Context): DiffTexts = DiffTexts { phrase, args ->
+            context.getString(phrase.res, *args)
+        }
+    }
+}
 
 /** Пара в снимке расписания: только то, изменение чего стоит уведомления. */
 data class SlotSnapshot(
@@ -64,12 +99,13 @@ fun diffWindow(
     until: LocalDate,
     includeRooms: Boolean = true,
     includeTeachers: Boolean = true,
+    texts: DiffTexts,
 ): List<ScheduleChange>? {
     val old = previous.filter { !it.date.isBefore(today) && !it.date.isAfter(until) }
     val new = current.filter { !it.date.isBefore(today) && !it.date.isAfter(until) }
     if (new.isEmpty() && old.isNotEmpty()) return null
     val lastDay = previous.maxOfOrNull { it.date } ?: return emptyList()
-    return diffSchedules(old, new.filter { !it.date.isAfter(lastDay) }, includeRooms, includeTeachers)
+    return diffSchedules(old, new.filter { !it.date.isAfter(lastDay) }, includeRooms, includeTeachers, texts)
 }
 
 /** Изменение в расписании за день [date]. */
@@ -90,6 +126,7 @@ fun diffSchedules(
     new: List<SlotSnapshot>,
     includeRooms: Boolean = true,
     includeTeachers: Boolean = true,
+    texts: DiffTexts,
 ): List<ScheduleChange> {
     val changes = mutableListOf<ScheduleChange>()
     val unmatchedOld = old.toMutableList()
@@ -101,7 +138,7 @@ fun diffSchedules(
             null
         } ?: continue
         unmatchedOld -= o
-        changes += compare(o, n, includeRooms, includeTeachers)
+        changes += compare(o, n, includeRooms, includeTeachers, texts)
     }
     for (n in unmatchedNew.toList()) {
         val o = unmatchedOld.firstOrNull { it.date == n.date && it.start != null && it.start == n.start } ?: continue
@@ -109,43 +146,74 @@ fun diffSchedules(
         unmatchedNew -= n
         if (o.subject != n.subject) {
             changes += ScheduleChange(
-                n.date, n.start, "${n.start.hm()} замена: ${o.subject} → ${n.subject}",
+                n.date,
+                n.start,
+                texts.text(DiffText.REPLACED, n.start.hm(), o.subject, n.subject),
                 subject = n.subject, teacher = n.teacher,
             )
         } else {
-            changes += compare(o, n, includeRooms, includeTeachers)
+            changes += compare(o, n, includeRooms, includeTeachers, texts)
         }
     }
     unmatchedOld.forEach { o ->
-        changes += ScheduleChange(o.date, o.start, "${o.start.hm()} отменена: ${o.subject}", subject = o.subject, teacher = o.teacher)
+        changes += ScheduleChange(
+            o.date,
+            o.start,
+            texts.text(DiffText.CANCELLED, o.start.hm(), o.subject),
+            subject = o.subject,
+            teacher = o.teacher,
+        )
     }
     unmatchedNew.forEach { n ->
-        changes += ScheduleChange(n.date, n.start, "${n.start.hm()} новая пара: ${n.subject}${n.where()}", subject = n.subject, teacher = n.teacher)
+        changes += ScheduleChange(
+            n.date,
+            n.start,
+            texts.text(DiffText.ADDED, n.start.hm(), n.subject, n.where(texts)),
+            subject = n.subject,
+            teacher = n.teacher,
+        )
     }
     return changes.sortedWith(compareBy({ it.date }, { it.start }))
 }
 
-private fun compare(o: SlotSnapshot, n: SlotSnapshot, includeRooms: Boolean, includeTeachers: Boolean): List<ScheduleChange> {
+private fun compare(
+    o: SlotSnapshot,
+    n: SlotSnapshot,
+    includeRooms: Boolean,
+    includeTeachers: Boolean,
+    texts: DiffTexts,
+): List<ScheduleChange> {
     val parts = buildList {
-        if (o.start != n.start || o.end != n.end) add("перенос ${o.start.hm()} → ${n.start.hm()}")
+        if (o.start != n.start || o.end != n.end) {
+            add(texts.text(DiffText.MOVED, o.start.hm(), n.start.hm()))
+        }
         if (o.subject != n.subject) add("${o.subject} → ${n.subject}")
-        if (o.distance != n.distance) add(if (n.distance) "теперь дистанционно" else "теперь очно")
-        if (includeRooms && !n.distance && o.room != n.room && n.room != null) add("кабинет ${o.room ?: "—"} → ${n.room}")
-        if (includeTeachers && o.teacher != n.teacher && n.teacher != null) add("преподаватель: ${n.teacher}")
+        if (o.distance != n.distance) {
+            add(texts.text(if (n.distance) DiffText.NOW_DISTANCE else DiffText.NOW_ONLINE))
+        }
+        if (includeRooms && !n.distance && o.room != n.room && n.room != null) {
+            add(texts.text(DiffText.ROOM, o.room ?: "—", n.room))
+        }
+        if (includeTeachers && o.teacher != n.teacher && n.teacher != null) {
+            add(texts.text(DiffText.TEACHER, n.teacher))
+        }
     }
     if (parts.isEmpty()) return emptyList()
     val at = if (o.start != n.start) o.start else n.start
     return listOf(
         ScheduleChange(
-            n.date, n.start, "${at.hm()} ${n.subject}: ${parts.joinToString(", ")}",
-            subject = n.subject, teacher = n.teacher,
+            n.date,
+            n.start,
+            texts.text(DiffText.SUMMARY, at.hm(), n.subject, parts.joinToString(", ")),
+            subject = n.subject,
+            teacher = n.teacher,
         ),
     )
 }
 
-private fun SlotSnapshot.where(): String = when {
-    distance -> " (дистанционно)"
-    room != null -> " (каб. $room)"
+private fun SlotSnapshot.where(texts: DiffTexts): String = when {
+    distance -> texts.text(DiffText.WHERE_DISTANCE)
+    room != null -> texts.text(DiffText.WHERE_ROOM, room)
     else -> ""
 }
 

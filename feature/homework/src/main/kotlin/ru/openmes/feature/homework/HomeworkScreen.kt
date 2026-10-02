@@ -1,5 +1,6 @@
 package ru.openmes.feature.homework
 
+import androidx.annotation.StringRes
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.Spacer
@@ -11,9 +12,9 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import android.os.Build
 import android.content.ClipboardManager
 import android.content.ClipData
+import android.content.Context
 import ru.openmes.core.designsystem.components.ScrollableFill
 import ru.openmes.core.designsystem.components.MesPullToRefreshBox
-import android.widget.Toast
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
@@ -40,6 +41,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.LoadingIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -52,6 +54,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -79,10 +82,13 @@ import ru.openmes.core.designsystem.components.EmptyState
 import ru.openmes.core.designsystem.components.ErrorState
 import ru.openmes.core.designsystem.components.GroupGap
 import ru.openmes.core.designsystem.components.LoadingState
+import ru.openmes.core.designsystem.components.mesDockReservedHeight
+import ru.openmes.core.designsystem.components.mesFadeTop
 import ru.openmes.core.designsystem.components.MesCard
 import ru.openmes.core.designsystem.components.SectionHeader
 import ru.openmes.core.designsystem.components.StatusPill
 import ru.openmes.core.designsystem.components.groupShape
+import ru.openmes.core.designsystem.components.mesSnackbar
 import ru.openmes.core.designsystem.components.openUrl
 import ru.openmes.core.model.Homework
 import ru.openmes.core.model.HomeworkMaterial
@@ -98,11 +104,16 @@ import ru.openmes.core.common.toFullRu
 import ru.openmes.core.designsystem.components.WeekBar
 import ru.openmes.core.designsystem.components.rememberDayPager
 import ru.openmes.core.designsystem.components.rememberShortSwipeFling
+import ru.openmes.core.designsystem.theme.Spacing
+import ru.openmes.feature.homework.R
 
 class HomeworkViewModel(
     private val sessionRepository: SessionRepository,
     private val diaryRepository: DiaryRepository,
 ) : ViewModel() {
+
+    /** Ошибка загрузки недели: ресурс строки и, если есть, деталь от сервера. */
+    data class LoadError(@StringRes val textRes: Int, val detail: String? = null)
 
     data class HomeworkUiState(
         val selectedDate: LocalDate = LocalDate.now(),
@@ -113,7 +124,7 @@ class HomeworkViewModel(
         /** Обновление по свайпу (фоновое — после показа кэша — без индикатора). */
         val refreshing: Boolean = false,
         /** Ошибки загрузки по неделям. */
-        val errors: Map<LocalDate, String> = emptyMap(),
+        val errors: Map<LocalDate, LoadError> = emptyMap(),
     ) {
         /** Задания дня, по предмету. */
         fun homeworksFor(date: LocalDate): List<Homework> =
@@ -135,7 +146,8 @@ class HomeworkViewModel(
         /** ЭОР Библиотеки МЭШ — во встроенном браузере с сессией библиотеки. */
         data class OpenLibrary(val url: String) : Event
         data class CopyUrl(val url: String) : Event
-        data class Error(val message: String) : Event
+        /** Ошибка: ресурс строки и, если есть, деталь от сервера. */
+        data class Error(@StringRes val textRes: Int, val detail: String? = null) : Event
     }
 
     private val _events = Channel<Event>(Channel.BUFFERED)
@@ -221,10 +233,12 @@ class HomeworkViewModel(
             }.onSuccess { list ->
                 _state.update { it.copy(weeks = it.weeks + (monday to list.withPending())) }
             }.onFailure { e ->
-                _state.update { it.copy(errors = it.errors + (monday to (e.message ?: "Ошибка загрузки"))) }
+                _state.update {
+                    it.copy(errors = it.errors + (monday to LoadError(R.string.homework_load_failed, e.message)))
+                }
                 // С данными на экране полноэкранной ошибки нет — сообщаем отдельно, чтобы сбой не был тихим.
                 if (monday in _state.value.weeks && userInitiated) {
-                    _events.send(Event.Error("Не удалось обновить задания" + (e.message?.let { ": $it" } ?: "")))
+                    _events.send(Event.Error(R.string.homework_refresh_failed, e.message))
                 }
             }
             _state.update { it.copy(loadingWeeks = it.loadingWeeks - monday, refreshing = it.refreshing && !userInitiated) }
@@ -261,7 +275,7 @@ class HomeworkViewModel(
             val confirmed = confirmedDone.remove(homeworkId)
             result.onFailure { e ->
                 updateLocal(homeworkId, confirmed ?: !target)
-                _events.send(Event.Error("Не удалось сохранить отметку" + (e.message?.let { ": $it" } ?: "")))
+                _events.send(Event.Error(R.string.homework_save_done_failed, e.message))
             }
         }
     }
@@ -286,7 +300,7 @@ class HomeworkViewModel(
         val entryId = homework.entryId
         val uuid = material.uuid
         if (entryId == null || uuid == null) {
-            _events.trySend(Event.Error("У материала нет ссылки"))
+            _events.trySend(Event.Error(R.string.homework_material_no_url))
             return
         }
         if (openingMaterial != null) return
@@ -294,7 +308,7 @@ class HomeworkViewModel(
             openingMaterial = uuid
             runSuspendCatching { diaryRepository.getHomeworkMaterialUrl(entryId, uuid) }
                 .onSuccess { _events.send(launched(it)) }
-                .onFailure { _events.send(Event.Error(it.message ?: "Не удалось открыть материал")) }
+                .onFailure { _events.send(Event.Error(R.string.homework_material_open_failed, it.message)) }
             openingMaterial = null
         }
     }
@@ -322,14 +336,16 @@ fun HomeworkScreen(viewModel: HomeworkViewModel) {
                 is HomeworkViewModel.Event.OpenLibrary -> context.openLibrary(event.url)
                 is HomeworkViewModel.Event.CopyUrl -> {
                     context.getSystemService(ClipboardManager::class.java)
-                        .setPrimaryClip(ClipData.newPlainText("Ссылка на материал", event.url))
+                        .setPrimaryClip(ClipData.newPlainText(context.getString(R.string.homework_material_link_clip), event.url))
                     // С Android 13 система сама показывает, что скопировано.
                     if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
-                        Toast.makeText(context, "Ссылка скопирована", Toast.LENGTH_SHORT).show()
+                        // Внутри LaunchedEffect composable-вызовов нет — берём текст через Context.
+                        mesSnackbar.show(context.getString(R.string.homework_link_copied))
                     }
                 }
+                // Внутри LaunchedEffect composable-вызовов нет — берём текст через Context.
                 is HomeworkViewModel.Event.Error ->
-                    Toast.makeText(context, event.message, Toast.LENGTH_LONG).show()
+                    mesSnackbar.show(errorText(context, event.textRes, event.detail), duration = SnackbarDuration.Long)
             }
         }
     }
@@ -363,32 +379,45 @@ fun HomeworkScreen(viewModel: HomeworkViewModel) {
             HorizontalPager(
                 state = dayPager.pagerState,
                 flingBehavior = rememberShortSwipeFling(dayPager.pagerState),
-                modifier = Modifier.fillMaxSize(),
+                // mesFadeTop на пейджере, а не на списке внутри страницы: полоса тогда
+                // не уезжает вместе со страницей при свайпе по дням.
+                modifier = Modifier
+                    .fillMaxSize()
+                    .mesFadeTop(),
             ) { page ->
                 val date = dayPager.days[page]
                 val items = state.homeworksFor(date)
                 val error = state.errorFor(date)
                 when {
                     !state.isLoaded(date) && error != null ->
-                        ScrollableFill { ErrorState(onRetry = viewModel::refresh, details = error) }
+                        ScrollableFill {
+                            ErrorState(
+                                onRetry = viewModel::refresh,
+                                details = errorText(context, error.textRes, error.detail),
+                            )
+                        }
                     !state.isLoaded(date) -> LoadingState()
                     items.isEmpty() -> Column(
                         Modifier
                             .fillMaxSize()
                             .verticalScroll(rememberScrollState())
-                            .padding(horizontal = 16.dp),
+                            .padding(horizontal = Spacing.l),
                     ) {
                         DayHeader(date, items)
                         EmptyState(
                             icon = Icons.AutoMirrored.Rounded.MenuBook,
-                            title = "Заданий нет",
-                            subtitle = "На этот день ничего не задали",
+                            title = stringResource(R.string.homework_empty_title),
+                            subtitle = stringResource(R.string.homework_empty_subtitle),
                         )
                     }
 
                     else -> LazyColumn(
                         modifier = Modifier.fillMaxSize(),
-                        contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 24.dp),
+                        contentPadding = PaddingValues(
+                            start = Spacing.l,
+                            end = Spacing.l,
+                            bottom = Spacing.xl + mesDockReservedHeight(),
+                        ),
                         verticalArrangement = Arrangement.spacedBy(GroupGap),
                     ) {
                         item(key = "header") { DayHeader(date, items) }
@@ -416,12 +445,12 @@ private fun DayHeader(date: LocalDate, items: List<Homework>) {
     val done = items.count { it.isDone }
     val allDone = items.isNotEmpty() && done == items.size
     SectionHeader(
-        title = "${date.humanize()}, ${date.dayOfWeek.toFullRu()}",
-        modifier = Modifier.padding(top = 8.dp),
+        title = stringResource(R.string.homework_day_title, date.humanize(), date.dayOfWeek.toFullRu()),
+        modifier = Modifier.padding(top = Spacing.s),
         trailing = {
             if (items.isNotEmpty()) {
                 StatusPill(
-                    text = "$done из ${items.size}",
+                    text = stringResource(R.string.homework_done_counter, done, items.size),
                     containerColor = if (allDone) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerHigh,
                     contentColor = if (allDone) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -429,6 +458,15 @@ private fun DayHeader(date: LocalDate, items: List<Homework>) {
         },
     )
 }
+
+/**
+ * Текст ошибки: строка [textRes] сама по себе, а с деталью от сети/сервера —
+ * одной строкой через [R.string.homework_error_detail].
+ */
+private fun errorText(context: Context, @StringRes textRes: Int, detail: String?): String =
+    detail?.let { context.getString(R.string.homework_error_detail, context.getString(textRes), it) }
+        ?: context.getString(textRes)
+
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -456,7 +494,7 @@ private fun HomeworkCard(
     ) {
         Row(
             verticalAlignment = Alignment.Top,
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            horizontalArrangement = Arrangement.spacedBy(Spacing.m),
         ) {
             Column(Modifier.weight(1f)) {
                 Text(
@@ -475,15 +513,15 @@ private fun HomeworkCard(
                         overflow = TextOverflow.Ellipsis,
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(top = 2.dp),
+                            .padding(top = Spacing.xxs),
                     )
                 }
                 if (expanded) SelectionContainer { task() } else task()
                 if (homework.materials.isNotEmpty()) {
                     FlowRow(
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        horizontalArrangement = Arrangement.spacedBy(Spacing.s),
                         verticalArrangement = Arrangement.spacedBy(6.dp),
-                        modifier = Modifier.padding(top = 8.dp),
+                        modifier = Modifier.padding(top = Spacing.s),
                     ) {
                         homework.materials.forEach { material ->
                             MaterialChip(
@@ -496,9 +534,9 @@ private fun HomeworkCard(
                     }
                 } else if (homework.materialsCount > 0) {
                     StatusPill(
-                        text = "Материалов: ${homework.materialsCount}",
+                        text = stringResource(R.string.homework_materials_count, homework.materialsCount),
                         icon = Icons.Rounded.AttachFile,
-                        modifier = Modifier.padding(top = 8.dp),
+                        modifier = Modifier.padding(top = Spacing.s),
                     )
                 }
             }
@@ -513,7 +551,9 @@ private fun HomeworkCard(
             ) {
                 Icon(
                     Icons.Rounded.Check,
-                    contentDescription = if (done) "Выполнено" else "Отметить выполненным",
+                    contentDescription = stringResource(
+                        if (done) R.string.homework_done else R.string.homework_mark_done_cd
+                    ),
                 )
             }
         }
@@ -542,14 +582,14 @@ private fun MaterialChip(
                     haptics.performHapticFeedback(HapticFeedbackType.LongPress)
                     onLongClick()
                 },
-                onLongClickLabel = "Скопировать ссылку",
+                onLongClickLabel = stringResource(R.string.homework_copy_link_label),
             ),
     ) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier
                 .heightIn(min = AssistChipDefaults.Height)
-                .padding(start = 8.dp, end = 16.dp),
+                .padding(start = Spacing.s, end = Spacing.l),
         ) {
             if (loading) {
                 LoadingIndicator(Modifier.size(AssistChipDefaults.IconSize))
@@ -565,7 +605,7 @@ private fun MaterialChip(
                     modifier = Modifier.size(AssistChipDefaults.IconSize),
                 )
             }
-            Spacer(Modifier.width(8.dp))
+            Spacer(Modifier.width(Spacing.s))
             Text(
                 material.title,
                 style = MaterialTheme.typography.labelLarge,

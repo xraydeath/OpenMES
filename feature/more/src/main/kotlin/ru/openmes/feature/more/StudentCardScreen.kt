@@ -42,6 +42,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -63,7 +64,9 @@ import ru.openmes.core.designsystem.components.MesListItem
 import ru.openmes.core.designsystem.components.SectionHeader
 import ru.openmes.core.designsystem.components.ShapeIcon
 import ru.openmes.core.designsystem.components.groupShape
+import ru.openmes.core.designsystem.theme.Spacing
 import ru.openmes.core.model.StudentCard
+import ru.openmes.feature.more.R
 
 class StudentCardViewModel(
     private val sessionRepository: SessionRepository,
@@ -143,37 +146,42 @@ fun StudentCardScreen(viewModel: StudentCardViewModel) {
             state.loading && card == null -> LoadingState()
             card == null -> ScrollableFill {
                 ErrorState(
-                    title = "Студенческий билет недоступен",
-                    subtitle = "Возможно, колледж ещё не выпустил электронный билет",
+                    title = stringResource(R.string.more_card_unavailable),
+                    subtitle = stringResource(R.string.more_card_unavailable_sub),
                     onRetry = viewModel::refresh,
                     details = state.error,
                 )
             }
 
             else -> {
+                // Подписи строк — ресурсами: строки собираются в списке до отрисовки.
                 val rows = listOf(
-                    Triple(Icons.Rounded.Event, "Дата выдачи", card.issueDate),
-                    Triple(Icons.Rounded.EventAvailable, "Действителен до", card.validUntil),
-                    Triple(Icons.Rounded.CoPresent, "Форма обучения", card.educationForm),
-                    Triple(Icons.Rounded.Stairs, "Курс", card.course),
-                    Triple(Icons.Rounded.School, "Уровень образования", card.educationLevel),
-                    Triple(Icons.Rounded.Work, "Специальность", card.specialty),
-                    Triple(Icons.Rounded.Gavel, "Приказ о зачислении", card.enrollmentOrder),
-                    Triple(Icons.Rounded.AccountBalance, "Учредитель", card.founderName),
+                    Triple(Icons.Rounded.Event, R.string.more_card_issue_date, card.issueDate),
+                    Triple(Icons.Rounded.EventAvailable, R.string.more_card_valid_until, card.validUntil),
+                    Triple(Icons.Rounded.CoPresent, R.string.more_card_education_form, card.educationForm),
+                    Triple(Icons.Rounded.Stairs, R.string.more_card_course, card.course),
+                    Triple(Icons.Rounded.School, R.string.more_card_education_level, card.educationLevel),
+                    Triple(Icons.Rounded.Work, R.string.more_card_specialty, card.specialty),
+                    Triple(Icons.Rounded.Gavel, R.string.more_card_enrollment_order, card.enrollmentOrder),
+                    Triple(Icons.Rounded.AccountBalance, R.string.more_card_founder, card.founderName),
                 ).filter { !it.third.isNullOrBlank() }
 
                 LazyColumn(
                     modifier = Modifier.fillMaxSize(),
-                    contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 24.dp),
+                    contentPadding = PaddingValues(start = Spacing.l, end = Spacing.l, top = Spacing.s, bottom = Spacing.xl),
                     verticalArrangement = Arrangement.spacedBy(GroupGap),
                 ) {
                     item { CardHero(card) }
-                    state.qr?.let { qr -> item { CardQr(qr) } }
-                    if (rows.isNotEmpty()) item { SectionHeader("Сведения", Modifier.padding(top = 12.dp)) }
+                    // Билет с номером и QR — два самостоятельных блока, а не слитная группа,
+                    // поэтому между ними шаг «между блоками», а не GroupGap.
+                    state.qr?.let { qr -> item { CardQr(qr, Modifier.padding(top = Spacing.s)) } }
+                    if (rows.isNotEmpty()) {
+                        item { SectionHeader(stringResource(R.string.more_card_details), Modifier.padding(top = Spacing.m)) }
+                    }
                     itemsIndexed(rows) { index, (icon, label, value) ->
                         MesListItem(
                             headline = value.orEmpty(),
-                            supporting = label,
+                            supporting = stringResource(label),
                             icon = icon,
                             shape = groupShape(index, rows.size),
                         )
@@ -191,15 +199,18 @@ private fun CardHero(card: StudentCard) {
         Box(Modifier.fillMaxWidth()) {
             Column(
                 Modifier.padding(end = 72.dp),
-                verticalArrangement = Arrangement.spacedBy(4.dp),
+                verticalArrangement = Arrangement.spacedBy(Spacing.xs),
             ) {
                 Text(
-                    "СТУДЕНЧЕСКИЙ БИЛЕТ",
+                    stringResource(R.string.more_card_heading),
                     style = MaterialTheme.typography.labelLargeEmphasized,
                     color = MaterialTheme.colorScheme.primary,
                 )
                 card.cardNumber?.let {
-                    Text("№ $it", style = MaterialTheme.typography.headlineMediumEmphasized)
+                    Text(
+                        stringResource(R.string.more_card_number, it),
+                        style = MaterialTheme.typography.headlineMediumEmphasized,
+                    )
                 }
             }
             ShapeIcon(
@@ -228,11 +239,11 @@ private fun CardHero(card: StudentCard) {
 
 /** QR для турникета/проверки: на белом фоне, чтобы читался и в тёмной теме. */
 @Composable
-private fun CardQr(qr: ImageBitmap) {
-    MesCard(containerColor = Color.White, contentColor = Color.Black) {
+private fun CardQr(qr: ImageBitmap, modifier: Modifier = Modifier) {
+    MesCard(containerColor = Color.White, contentColor = Color.Black, modifier = modifier) {
         Image(
             bitmap = qr,
-            contentDescription = "QR-код студенческого билета",
+            contentDescription = stringResource(R.string.more_card_qr_cd),
             filterQuality = FilterQuality.None,
             modifier = Modifier
                 .align(Alignment.CenterHorizontally)
@@ -240,9 +251,9 @@ private fun CardQr(qr: ImageBitmap) {
                 .aspectRatio(1f),
         )
         Text(
-            "Покажите QR-код на входе",
+            stringResource(R.string.more_card_qr_hint),
             style = MaterialTheme.typography.labelLarge,
-            modifier = Modifier.align(Alignment.CenterHorizontally).padding(top = 8.dp),
+            modifier = Modifier.align(Alignment.CenterHorizontally).padding(top = Spacing.s),
         )
     }
 }

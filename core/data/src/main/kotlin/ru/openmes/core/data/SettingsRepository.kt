@@ -28,6 +28,8 @@ data class AppSettings(
     val marksNotifications: Boolean = false,
     /** Не показывать значение оценки в тексте уведомления. */
     val hideMarkValues: Boolean = false,
+    /** Тот же фоновый опрос дневника, но для ДЗ: новые задания и правки их текста. */
+    val homeworkChangeNotifications: Boolean = false,
     /** Напоминание перед началом пары. */
     val lessonReminders: Boolean = false,
     /** За сколько минут до начала пары напоминать. */
@@ -79,6 +81,7 @@ interface SettingsRepository {
     suspend fun setCurrentChildId(id: String?)
     suspend fun setMarksNotifications(enabled: Boolean)
     suspend fun setHideMarkValues(enabled: Boolean)
+    suspend fun setHomeworkChangeNotifications(enabled: Boolean)
     suspend fun setCalculatorKeyboard(enabled: Boolean)
     suspend fun setLessonReminders(enabled: Boolean)
     suspend fun setLessonReminderMinutes(minutes: Int)
@@ -114,6 +117,7 @@ class DataStoreSettingsRepository(
         val CURRENT_CHILD = stringPreferencesKey("current_child_id")
         val MARKS_NOTIFICATIONS = booleanPreferencesKey("marks_notifications")
         val HIDE_MARK_VALUES = booleanPreferencesKey("hide_mark_values")
+        val HOMEWORK_CHANGES = booleanPreferencesKey("homework_changes")
         val CALCULATOR_KEYBOARD = booleanPreferencesKey("calculator_keyboard")
         val LESSON_REMINDERS = booleanPreferencesKey("lesson_reminders")
         val LESSON_REMINDER_MINUTES = intPreferencesKey("lesson_reminder_minutes")
@@ -145,6 +149,7 @@ class DataStoreSettingsRepository(
             dynamicColor = prefs[Keys.DYNAMIC_COLOR] ?: false,
             marksNotifications = prefs[Keys.MARKS_NOTIFICATIONS] ?: false,
             hideMarkValues = prefs[Keys.HIDE_MARK_VALUES] ?: false,
+            homeworkChangeNotifications = prefs[Keys.HOMEWORK_CHANGES] ?: false,
             calculatorKeyboard = prefs[Keys.CALCULATOR_KEYBOARD] ?: false,
             lessonReminders = prefs[Keys.LESSON_REMINDERS] ?: false,
             lessonReminderMinutes = prefs[Keys.LESSON_REMINDER_MINUTES] ?: 10,
@@ -168,6 +173,7 @@ class DataStoreSettingsRepository(
                 four = prefs[Keys.ROUND_FOUR] ?: RoundingRules.STANDARD.four,
                 three = prefs[Keys.ROUND_THREE] ?: RoundingRules.STANDARD.three,
             ).takeIf { it.isValid } ?: RoundingRules.STANDARD,
+            // Пустая строка — тоже «фона нет»: так строка не остаётся в данных после снятия.
         )
     }
 
@@ -194,6 +200,10 @@ class DataStoreSettingsRepository(
 
     override suspend fun setHideMarkValues(enabled: Boolean) {
         context.settingsDataStore.edit { it[Keys.HIDE_MARK_VALUES] = enabled }
+    }
+
+    override suspend fun setHomeworkChangeNotifications(enabled: Boolean) {
+        context.settingsDataStore.edit { it[Keys.HOMEWORK_CHANGES] = enabled }
     }
 
     override suspend fun setCalculatorKeyboard(enabled: Boolean) {
@@ -307,4 +317,4 @@ class DataStoreSettingsRepository(
         }
     }
 
-}
+    }

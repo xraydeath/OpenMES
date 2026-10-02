@@ -122,14 +122,15 @@ class OpenMESApp : Application(), SingletonImageLoader.Factory {
             .launchIn(appScope)
     }
 
-    /** Фоновая проверка оценок включается/выключается из настроек. */
+    /** Фоновая проверка дневника включается/выключается из настроек. */
     private fun wireMarksPolling() {
         val settingsRepository = GlobalContext.get().get<SettingsRepository>()
         settingsRepository.settings
-            .map { it.marksNotifications }
+            // Один воркер на оба списка — держим его, пока включён хоть один тумблер.
+            .map { it.marksNotifications to it.homeworkChangeNotifications }
             .distinctUntilChanged()
-            .onEach { enabled ->
-                if (enabled) MarksPollWorker.schedule(this) else MarksPollWorker.cancel(this)
+            .onEach { (marks, homework) ->
+                if (marks || homework) MarksPollWorker.schedule(this) else MarksPollWorker.cancel(this)
             }
             .launchIn(appScope)
     }

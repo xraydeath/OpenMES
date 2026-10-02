@@ -15,7 +15,8 @@ import kotlinx.coroutines.flow.first
 import org.koin.core.component.KoinComponent
 import org.koin.core.component.inject
 import org.koin.core.context.GlobalContext
-import ru.openmes.core.common.pluralRu
+import ru.openmes.app.R
+import ru.openmes.core.common.runSuspendCatching
 import ru.openmes.core.common.runSuspendCatching
 import ru.openmes.core.data.DiaryRepository
 import ru.openmes.core.data.SettingsRepository
@@ -84,8 +85,14 @@ class EveningReminderWorker(
             val open = homeworks.orEmpty().filter { it.date == tomorrow && !it.isDone && it.task.isNotBlank() }
             if (open.isNotEmpty()) {
                 val lines = open.map { "${it.subjectName}: ${it.task.lineSequence().first().take(80)}" }
+                val context = applicationContext
+                val title = context.resources.getQuantityString(
+                    R.plurals.notify_homework_tomorrow,
+                    open.size,
+                    open.size,
+                )
                 val builder = Notifications.builder(applicationContext, Notifications.Channel.EVENING)
-                    .setContentTitle("На завтра не сделано: ${open.size} ${pluralRu(open.size, "задание", "задания", "заданий")}")
+                    .setContentTitle(title)
                     .setContentText(open.joinToString(", ") { it.subjectName })
                     .setStyle(NotificationCompat.InboxStyle().also { style -> lines.forEach(style::addLine) })
                 Notifications.post(applicationContext, ID_HOMEWORK, builder)
@@ -97,9 +104,23 @@ class EveningReminderWorker(
                 .orEmpty()
                 .filter { it.date == tomorrow }
             if (tests.isNotEmpty()) {
-                val lines = tests.map { t -> listOfNotNull(t.name ?: "Контрольная", t.subjectName).joinToString(" — ") }
+                val context = applicationContext
+                val lines = tests.map { t ->
+                    listOfNotNull(t.name ?: context.getString(R.string.notify_default_test), t.subjectName)
+                        .joinToString(" — ")
+                }
                 val builder = Notifications.builder(applicationContext, Notifications.Channel.EVENING)
-                    .setContentTitle(if (tests.size == 1) "Завтра: ${lines.first()}" else "Завтра контрольных: ${tests.size}")
+                    .setContentTitle(
+                        if (tests.size == 1) {
+                            context.getString(R.string.notify_tomorrow_named, lines.first())
+                        } else {
+                            context.resources.getQuantityString(
+                                R.plurals.notify_tests_tomorrow,
+                                tests.size,
+                                tests.size,
+                            )
+                        },
+                    )
                     .setContentText(lines.joinToString(", "))
                     .setStyle(NotificationCompat.InboxStyle().also { style -> lines.forEach(style::addLine) })
                 Notifications.post(applicationContext, ID_TESTS, builder)

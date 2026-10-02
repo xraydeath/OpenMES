@@ -15,7 +15,11 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.widthIn
+import androidx.annotation.StringRes
+import androidx.compose.ui.res.stringResource
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.offset
@@ -38,8 +42,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.ShortNavigationBar
-import androidx.compose.material3.ShortNavigationBarItem
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBarDefaults
@@ -87,7 +89,15 @@ import org.koin.core.parameter.parametersOf
 import ru.openmes.core.data.NotificationHistory
 import ru.openmes.core.data.Session
 import ru.openmes.core.data.SessionRepository
+import ru.openmes.core.designsystem.components.LocalMesEdgeFade
 import ru.openmes.core.designsystem.components.LocalPullToRefreshEnabled
+import ru.openmes.core.designsystem.components.MesContentMaxWidth
+import ru.openmes.core.designsystem.components.MesDock
+import ru.openmes.core.designsystem.components.MesBottomScrim
+import ru.openmes.core.designsystem.components.MesDockDestination
+import ru.openmes.core.designsystem.components.MesSnackbarHost
+import ru.openmes.core.designsystem.components.openUrl
+import ru.openmes.core.designsystem.theme.Spacing
 import ru.openmes.core.network.interceptor.OfflineCache
 import ru.openmes.feature.auth.LoginScreen
 import ru.openmes.feature.homework.HomeworkScreen
@@ -115,53 +125,67 @@ import ru.openmes.feature.schedule.ScheduleScreen
 
 private data class TopLevelDestination(
     val route: String,
-    val label: String,
-    val icon: ImageVector,
-    val selectedIcon: ImageVector,
-)
+    @StringRes override val label: Int,
+    override val icon: ImageVector,
+    override val unread: Boolean = false,
+) : MesDockDestination
 
+/** Репозиторий — кнопка «Исходный код» на экране входа. */
+private const val SOURCE_URL = "https://github.com/xraydeath/OpenMES"
+
+// Иконки дока скруглённые: в пилюле выбранный пункт отмечает подпись и индикатор, а не
+// сменой формы иконки, поэтому она всегда залитая.
 private val topLevelDestinations = listOf(
-    TopLevelDestination("schedule", "Расписание", Icons.Outlined.CalendarMonth, Icons.Rounded.CalendarMonth),
-    TopLevelDestination("marks", "Оценки", Icons.Outlined.Grade, Icons.Rounded.Grade),
-    TopLevelDestination("homework", "Домашка", Icons.AutoMirrored.Rounded.MenuBook, Icons.AutoMirrored.Rounded.MenuBook),
-    TopLevelDestination("more", "Ещё", Icons.Outlined.Widgets, Icons.Rounded.Widgets),
+    TopLevelDestination("schedule", R.string.nav_schedule, Icons.Rounded.CalendarMonth),
+    TopLevelDestination("marks", R.string.nav_marks, Icons.Rounded.Grade),
+    TopLevelDestination("homework", R.string.nav_homework, Icons.AutoMirrored.Rounded.MenuBook),
+    // История уведомлений — в доке, а не колокольчиком в шапке: колокольчик был
+    // единственным элементом, стоявшим вне сетки экрана, и его ещё надо было
+    // отдельно прятать на всех подразделах «Ещё».
+    TopLevelDestination(HISTORY_ROUTE, R.string.nav_history, Icons.Rounded.Notifications),
+    TopLevelDestination(MORE_ROUTE, R.string.nav_more, Icons.Rounded.Widgets),
 )
 
 /** Заголовки экранов для flexible top app bar. */
 private val screenTitles = mapOf(
-    "schedule" to "Расписание",
-    "marks" to "Оценки",
-    "homework" to "Домашние задания",
-    "more" to "Ещё",
-    "attendance" to "Посещаемость",
-    "visits" to "Проходы",
-    "student_card" to "Студенческий билет",
-    "food" to "Питание",
-    "news" to "Новости",
-    "news/{id}" to "Новость",
-    "school_info" to "О колледже",
-    "proforientation" to "Профориентация",
-    "portfolio" to "Портфолио",
-    "settings" to "Настройки",
-    "cache_settings" to "Кэш и офлайн",
-    "notification_settings" to "Уведомления",
-    "notification_history" to "История уведомлений",
-    "api_console" to "Консоль API",
+    "schedule" to R.string.title_schedule,
+    "marks" to R.string.title_marks,
+    "homework" to R.string.title_homework,
+    HISTORY_ROUTE to R.string.title_notification_history,
+    "more" to R.string.title_more,
+    "attendance" to R.string.title_attendance,
+    "visits" to R.string.title_visits,
+    "student_card" to R.string.title_student_card,
+    "food" to R.string.title_food,
+    "news" to R.string.title_news,
+    "news/{id}" to R.string.title_news_single,
+    "school_info" to R.string.title_school_info,
+    "proforientation" to R.string.title_proforientation,
+    "portfolio" to R.string.title_portfolio,
+    "settings" to R.string.title_settings,
+    "cache_settings" to R.string.title_cache_settings,
+    "notification_settings" to R.string.title_notification_settings,
+    "api_console" to R.string.title_api_console,
 )
 
 private val authRoutes = setOf("login")
 
 /**
- * Экраны без колокольчика истории: в «Ещё», настройках (и их подразделах)
- * и на самой истории он не нужен — там до уведомлений другие пути.
+ * Колокольчик истории — только на трёх рабочих вкладках (расписание, оценки, домашка).
+ *
+ * Раньше это был список запрещённых маршрутов, и под «Ещё» попадали только четыре из
+ * десятка подэкранов: колокольчик вылезал то на «Посещениях», то на «Питании». Теперь
+ * правило положительное — колокольчик есть везде, кроме самого «Ещё» и всех его потомков,
+ * так что новый подэкран автоматически останется чистым.
  */
-private val bellHiddenRoutes = setOf(
-    "more",
-    "settings",
-    "notification_settings",
-    "cache_settings",
-    "notification_history",
-)
+/** Маршрут «Ещё» — вкладка с разделами, которые не поместились в док. */
+private const val MORE_ROUTE = "more"
+
+/**
+ * Маршрут истории уведомлений. Живёт в доке рядом с вкладками, но ведёт себя как
+ * обычный экран: из него возвращает кнопка «назад» в шапке, а не док.
+ */
+private const val HISTORY_ROUTE = "notification_history"
 
 @Composable
 fun AppNavHost() {
@@ -190,8 +214,28 @@ fun AppNavHost() {
 
     val backStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = backStackEntry?.destination?.route
-    val showBottomBar = currentRoute in topLevelDestinations.map { it.route }
-    val title = screenTitles[currentRoute]
+
+    // Точка непрочитанного на пункте «История». Список пересобирается только когда
+    // меняется сам факт непрочитанного, а не на каждый кадр и не на каждую запись.
+    val history = koinInject<NotificationHistory>()
+    val historyEntries by history.entries.collectAsStateWithLifecycle()
+    val historySeen by history.lastSeenMillis.collectAsStateWithLifecycle()
+    val dockDestinations = remember(historyEntries, historySeen) {
+        topLevelDestinations.map {
+            if (it.route == HISTORY_ROUTE) {
+                it.copy(unread = historyEntries.any { entry -> entry.timeMillis > historySeen })
+            } else {
+                it
+            }
+        }
+    }
+
+    // null на подэкранах: док там не нужен, там своя кнопка «назад» в заголовке.
+    // Ищем именно в dockDestinations: у этого списка есть unread, и пункт из
+    // topLevelDestinations по равенству с ним не совпал бы — подсветка бы пропала.
+    val selectedDestination = dockDestinations.firstOrNull { it.route == currentRoute }
+    val showBottomBar = selectedDestination != null
+    val title = screenTitles[currentRoute]?.let { stringResource(it) }
 
     // У каждого экрана своё состояние сворачивания заголовка.
     val appBarState = remember(currentRoute) { TopAppBarState(-Float.MAX_VALUE, 0f, 0f) }
@@ -199,6 +243,7 @@ fun AppNavHost() {
 
     Scaffold(
         modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
+        snackbarHost = { MesSnackbarHost() },
         topBar = {
             if (title != null) {
                 CollapsingTopBar(
@@ -206,211 +251,207 @@ fun AppNavHost() {
                     showBack = !showBottomBar,
                     onBack = { navController.navigateUp() },
                     scrollBehavior = scrollBehavior,
-                    trailing = if (session is Session.LoggedIn) {
-                        { HistoryBell(visible = currentRoute !in bellHiddenRoutes, onClick = { navController.navigate("notification_history") }) }
-                    } else null,
                 )
             }
         },
-        bottomBar = {
-            if (showBottomBar) {
-                ShortNavigationBar {
-                    topLevelDestinations.forEach { destination ->
-                        val selected = currentRoute == destination.route
-                        ShortNavigationBarItem(
-                            selected = selected,
-                            onClick = {
-                                navController.navigateToTopLevel(destination.route)
-                            },
-                            icon = {
-                                Icon(
-                                    if (selected) destination.selectedIcon else destination.icon,
-                                    contentDescription = null,
-                                )
-                            },
-                            label = { Text(destination.label) },
-                        )
-                    }
-                }
-            }
-        },
-    ) { padding ->
+        ) { padding ->
         // Pull-to-refresh — только при полностью развёрнутом заголовке.
         // Лямбда стабильна на маршрут — иначе static local перекомпоновывал бы весь NavHost.
         val refreshEnabled: () -> Boolean = remember(scrollBehavior) {
             { scrollBehavior.state.collapsedFraction == 0f }
         }
+        // Растворение контента у верхней кромки: едет на свёрнутости панели, то есть
+        // появляется вместе с прокруткой и уходит вместе с ней. Саму полосу рисуют экраны —
+        // на своём скролл-контейнере (см. MesEdgeFade).
+        val edgeFade: () -> Float = remember(scrollBehavior) {
+            { scrollBehavior.state.collapsedFraction.coerceIn(0f, 1f) }
+        }
         val offlineCache = koinInject<OfflineCache>()
         val offlineDataTime by offlineCache.offlineDataTime.collectAsStateWithLifecycle()
-        CompositionLocalProvider(LocalPullToRefreshEnabled provides refreshEnabled) {
-          Column(Modifier.padding(padding)) {
-            AnimatedVisibility(offlineDataTime != null && currentRoute !in authRoutes) {
-                OfflineBanner(offlineDataTime ?: 0L)
-            }
-            NavHost(
-                navController = navController,
-                startDestination = "schedule",
-                modifier = Modifier.weight(1f),
-                // M3 fade-through: старый экран быстро гаснет, новый проявляется с лёгким зумом —
-                // без долгого наложения двух экранов (стандартный кроссфейд 700 мс «мерцает»).
-                enterTransition = { FadeThroughIn },
-                exitTransition = { FadeThroughOut },
-                popEnterTransition = { FadeThroughIn },
-                popExitTransition = { FadeThroughOut },
+        CompositionLocalProvider(
+            LocalPullToRefreshEnabled provides refreshEnabled,
+            LocalMesEdgeFade provides edgeFade,
+        ) {
+          // На планшете и в альбомной ориентации колонка не растягивается во всю ширину:
+          // строки длиннее ~840 dp читать неудобно, а док уехал бы к краям.
+          Box(Modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
+            // Нижний инсет отдаём экранам: контент должен уезжать под док и под системную
+            // навигацию, а полоса MesBottomScrim закрывает обоих. Scaffold этот инсет съедал,
+            // и навбар оставался голым — без него не видно, что под ним что-то едет.
+            // Подэкраны (где дока нет) инсет по-прежнему получают обычным отступом.
+            val bottomInset = if (showBottomBar) 0.dp else padding.calculateBottomPadding()
+            Column(
+              Modifier
+                  .padding(
+                      top = padding.calculateTopPadding(),
+                      bottom = bottomInset,
+                  )
+                  .fillMaxWidth()
+                  .widthIn(max = MesContentMaxWidth),
             ) {
-                composable("login") {
-                    LoginScreen(
-                        viewModel = koinViewModel(),
-                        onOpenSource = { /* TODO: ссылка на репозиторий */ },
-                    )
-                }
+              AnimatedVisibility(offlineDataTime != null && currentRoute !in authRoutes) {
+                  OfflineBanner(offlineDataTime ?: 0L)
+              }
+              NavHost(
+                  navController = navController,
+                  startDestination = "schedule",
+                  modifier = Modifier
+                      .weight(1f)
+                      .fillMaxWidth(),
+                  // M3 fade-through: старый экран быстро гаснет, новый проявляется с лёгким зумом —
+                  // без долгого наложения двух экранов (стандартный кроссфейд 700 мс «мерцает»).
+                  enterTransition = { FadeThroughIn },
+                  exitTransition = { FadeThroughOut },
+                  popEnterTransition = { FadeThroughIn },
+                  popExitTransition = { FadeThroughOut },
+              ) {
+                  composable("login") {
+                      val context = LocalContext.current
+                      LoginScreen(
+                          viewModel = koinViewModel(),
+                          onOpenSource = { context.openUrl(SOURCE_URL) },
+                      )
+                  }
 
-                composable("schedule") {
-                    ScheduleScreen(viewModel = koinViewModel())
-                }
+                  composable("schedule") {
+                      ScheduleScreen(viewModel = koinViewModel())
+                  }
 
-                composable("marks") {
-                    MarksScreen(viewModel = koinViewModel())
-                }
+                  composable("marks") {
+                      MarksScreen(viewModel = koinViewModel())
+                  }
 
-                composable("homework") {
-                    HomeworkScreen(viewModel = koinViewModel())
-                }
+                  composable("homework") {
+                      HomeworkScreen(viewModel = koinViewModel())
+                  }
 
-                composable("more") {
-                    val context = LocalContext.current
-                    MoreScreen(
-                        viewModel = koinViewModel(),
-                        onOpenSettings = { navController.navigate("settings") },
-                        onOpenAttendance = { navController.navigate("attendance") },
-                        onOpenVisits = { navController.navigate("visits") },
-                        onOpenStudentCard = { navController.navigate("student_card") },
-                        onOpenFood = { navController.navigate("food") },
-                        onOpenNews = { navController.navigate("news") },
-                        onOpenSchoolInfo = { navController.navigate("school_info") },
-                        onOpenProforientation = { navController.navigate("proforientation") },
-                        onOpenPortfolio = { navController.navigate("portfolio") },
-                        onOpenLibrary = { context.openLibrary() },
-                    )
-                }
+                  composable("more") {
+                      val context = LocalContext.current
+                      MoreScreen(
+                          viewModel = koinViewModel(),
+                          onOpenSettings = { navController.navigate("settings") },
+                          onOpenAttendance = { navController.navigate("attendance") },
+                          onOpenVisits = { navController.navigate("visits") },
+                          onOpenStudentCard = { navController.navigate("student_card") },
+                          onOpenFood = { navController.navigate("food") },
+                          onOpenNews = { navController.navigate("news") },
+                          onOpenSchoolInfo = { navController.navigate("school_info") },
+                          onOpenProforientation = { navController.navigate("proforientation") },
+                          onOpenPortfolio = { navController.navigate("portfolio") },
+                          onOpenLibrary = { context.openLibrary() },
+                      )
+                  }
 
-                composable("attendance") {
-                    AttendanceScreen(viewModel = koinViewModel())
-                }
+                  composable("attendance") {
+                      AttendanceScreen(viewModel = koinViewModel())
+                  }
 
-                composable("visits") {
-                    VisitsScreen(viewModel = koinViewModel())
-                }
+                  composable("visits") {
+                      VisitsScreen(viewModel = koinViewModel())
+                  }
 
-                composable("student_card") {
-                    StudentCardScreen(viewModel = koinViewModel())
-                }
+                  composable("student_card") {
+                      StudentCardScreen(viewModel = koinViewModel())
+                  }
 
-                composable("food") {
-                    FoodScreen(viewModel = koinViewModel())
-                }
+                  composable("food") {
+                      FoodScreen(viewModel = koinViewModel())
+                  }
 
-                composable("news") {
-                    NewsScreen(
-                        viewModel = koinViewModel(),
-                        onOpenNews = { id -> navController.navigate("news/$id") },
-                    )
-                }
+                  composable("news") {
+                      NewsScreen(
+                          viewModel = koinViewModel(),
+                          onOpenNews = { id -> navController.navigate("news/$id") },
+                      )
+                  }
 
-                composable(
-                    "news/{id}",
-                    arguments = listOf(navArgument("id") { type = NavType.LongType }),
-                ) { entry ->
-                    val id = entry.arguments?.getLong("id") ?: 0L
-                    NewsDetailScreen(viewModel = koinViewModel { parametersOf(id) })
-                }
+                  composable(
+                      "news/{id}",
+                      arguments = listOf(navArgument("id") { type = NavType.LongType }),
+                  ) { entry ->
+                      val id = entry.arguments?.getLong("id") ?: 0L
+                      NewsDetailScreen(viewModel = koinViewModel { parametersOf(id) })
+                  }
 
-                composable("school_info") {
-                    SchoolInfoScreen(viewModel = koinViewModel())
-                }
+                  composable("school_info") {
+                      SchoolInfoScreen(viewModel = koinViewModel())
+                  }
 
-                composable("proforientation") {
-                    ProforientationScreen(viewModel = koinViewModel())
-                }
+                  composable("proforientation") {
+                      ProforientationScreen(viewModel = koinViewModel())
+                  }
 
-                composable("portfolio") {
-                    PortfolioScreen(viewModel = koinViewModel())
-                }
+                  composable("portfolio") {
+                      PortfolioScreen(viewModel = koinViewModel())
+                  }
 
-                composable("settings") {
-                    SettingsScreen(
-                        viewModel = koinViewModel(),
-                        onOpenCache = { navController.navigate("cache_settings") },
-                        onOpenNotifications = { navController.navigate("notification_settings") },
-                        // Отладочная консоль API — только в debug-сборках.
-                        onOpenApiConsole = if (BuildConfig.DEBUG) {
-                            { navController.navigate("api_console") }
-                        } else null,
-                    )
-                }
+                  composable("settings") {
+                      SettingsScreen(
+                          viewModel = koinViewModel(),
+                          onOpenCache = { navController.navigate("cache_settings") },
+                          onOpenNotifications = { navController.navigate("notification_settings") },
+                          // Отладочная консоль API — только в debug-сборках.
+                          onOpenApiConsole = if (BuildConfig.DEBUG) {
+                              { navController.navigate("api_console") }
+                          } else null,
+                      )
+                  }
 
-                if (BuildConfig.DEBUG) composable("api_console") {
-                    ApiConsoleScreen(viewModel = koinViewModel())
-                }
+                  if (BuildConfig.DEBUG) composable("api_console") {
+                      ApiConsoleScreen(viewModel = koinViewModel())
+                  }
 
-                composable("notification_history") {
-                    NotificationHistoryScreen(viewModel = koinViewModel())
-                }
+                  composable(HISTORY_ROUTE) {
+                      NotificationHistoryScreen(viewModel = koinViewModel())
+                  }
 
-                composable("notification_settings") {
-                    val context = LocalContext.current
-                    NotificationSettingsScreen(
-                        viewModel = koinViewModel(),
-                        onPreviewLesson = { LessonReminders.showPreview(context) },
-                        onCheckEvening = { EveningReminders.runNow(context) },
-                        onTestNotification = { Notifications.postSample(context, it) },
-                    )
-                }
+                  composable("notification_settings") {
+                      val context = LocalContext.current
+                      NotificationSettingsScreen(
+                          viewModel = koinViewModel(),
+                          onPreviewLesson = { LessonReminders.showPreview(context) },
+                          onCheckEvening = { EveningReminders.runNow(context) },
+                          onTestNotification = { Notifications.postSample(context, it) },
+                      )
+                  }
 
-                composable("cache_settings") {
-                    CacheSettingsScreen(viewModel = koinViewModel())
+                  composable("cache_settings") {
+                      CacheSettingsScreen(viewModel = koinViewModel())
+                  }
                 }
+              }
+            // Док висит поверх контента, а не занимает отдельную полосу Scaffold: списки
+            // верхнего уровня сами оставляют снизу MesDockReservedHeight и потому уезжают
+            // под него. Слот bottomBar для этого не годится — он наоборот отодвигает
+            // содержимое, и под доком всегда оказывался бы пустой фон.
+            if (selectedDestination != null) {
+              // Полоса идёт под доком: навбар подсвечен ровно настолько, чтобы сквозь него
+              // не читался обрезок карточки, а выше, где контент ещё видно, он тает.
+              MesBottomScrim(modifier = Modifier.align(Alignment.BottomCenter))
+              MesDock(
+                destinations = dockDestinations,
+                selected = selectedDestination,
+                onSelect = { dest ->
+                    when (dest.route) {
+                        // История — экран, а не вкладка: её открывают поверх текущей
+                        // вкладки, и назад из неё возвращает туда же, откуда пришли.
+                        HISTORY_ROUTE -> navController.navigate(HISTORY_ROUTE) {
+                            launchSingleTop = true
+                        }
+                        else -> {
+                            // Перед переходом снимаем историю со стека. Иначе
+                            // navigateToTopLevel сохранит её вместе с уходящей
+                            // вкладкой, и restoreState вернёт историю поверх неё
+                            // же — экран откроется сам при нажатии на соседний пункт.
+                            navController.popBackStack(HISTORY_ROUTE, inclusive = true)
+                            navController.navigateToTopLevel(dest.route)
+                        }
+                    }
+                },
+                modifier = Modifier.align(Alignment.BottomCenter),
+              )
             }
           }
-        }
-    }
-}
-
-/** Колокольчик истории уведомлений: точка на круге кнопки, пока есть записи новее последнего просмотра. */
-@Composable
-private fun HistoryBell(visible: Boolean, onClick: () -> Unit) {
-    val history = koinInject<NotificationHistory>()
-    val entries by history.entries.collectAsStateWithLifecycle()
-    val seen by history.lastSeenMillis.collectAsStateWithLifecycle()
-    val unread = entries.count { it.timeMillis > seen }
-    AnimatedVisibility(
-        visible = visible,
-        enter = BellIn,
-        exit = BellOut,
-    ) {
-        Box(contentAlignment = Alignment.Center) {
-            FilledTonalIconButton(onClick = onClick, shapes = IconButtonDefaults.shapes()) {
-                Icon(
-                    Icons.Rounded.Notifications,
-                    contentDescription = if (unread > 0) {
-                        "История уведомлений, непрочитанных: $unread"
-                    } else {
-                        "История уведомлений"
-                    },
-                )
-            }
-            // Точка рисуем сами, а не через BadgedBox: тот целит бейдж в угол
-            // ограничивающего квадрата, а кнопка круглая — на углах квадрата точка
-            // оказывалась далеко за окружностью. Здесь она лежит ровно на круге.
-            if (unread > 0) {
-                Box(
-                    Modifier
-                        .align(Alignment.Center)
-                        .offset(x = BellDotOffset, y = -BellDotOffset)
-                        .size(BellDotSize)
-                        .background(MaterialTheme.colorScheme.error, CircleShape),
-                )
-            }
         }
     }
 }
@@ -426,7 +467,6 @@ private fun CollapsingTopBar(
     showBack: Boolean,
     onBack: () -> Unit,
     scrollBehavior: TopAppBarScrollBehavior,
-    trailing: (@Composable () -> Unit)? = null,
 ) {
     val state = scrollBehavior.state
     val density = LocalDensity.current
@@ -454,26 +494,20 @@ private fun CollapsingTopBar(
                 Box(
                     Modifier
                         .height(CollapsedBarHeight)
-                        .padding(start = 8.dp),
+                        .padding(start = Spacing.l),
                     contentAlignment = Alignment.CenterStart,
                 ) {
                     FilledTonalIconButton(onClick = onBack, shapes = IconButtonDefaults.shapes()) {
-                        Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Назад")
+                        Icon(
+                            Icons.AutoMirrored.Rounded.ArrowBack,
+                            contentDescription = stringResource(R.string.action_back_cd),
+                        )
                     }
                 }
             }
             // Действия — правый верхний угол, как в M3 top app bar: видны и свёрнуто, и развёрнуто.
-            if (trailing != null) {
-                Box(
-                    Modifier
-                        .align(Alignment.TopEnd)
-                        .height(CollapsedBarHeight)
-                        .padding(end = 8.dp),
-                    contentAlignment = Alignment.CenterEnd,
-                ) {
-                    trailing()
-                }
-            }
+            // Поле Spacing.l — то же, что у заголовка и у списков, поэтому кнопки шапки
+            // встают в одну линию с контентом, а не вылезают правее него.
             Text(
                 title,
                 style = bigStyle,
@@ -481,15 +515,17 @@ private fun CollapsingTopBar(
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier
                     .align(Alignment.BottomStart)
-                    .padding(end = 16.dp)
+                    .padding(end = Spacing.l)
                     .graphicsLayer {
                         val f = state.collapsedFraction
                         val scale = lerp(1f, endScale, f)
                         scaleX = scale
                         scaleY = scale
                         transformOrigin = TransformOrigin(0f, 0.5f)
-                        val startX = 16.dp.toPx()
-                        val endX = if (showBack) 64.dp.toPx() else 16.dp.toPx()
+                        val startX = Spacing.l.toPx()
+                        // Свёрнуто заголовок уходит за кнопку «назад», но не под неё:
+                        // поле, ширина кнопки и ещё одно поле.
+                        val endX = if (showBack) (Spacing.l * 2 + BarActionWidth).toPx() else startX
                         translationX = lerp(startX, endX, f)
                         // Развёрнуто: отступ снизу 20dp; свёрнуто: центр строки 64dp.
                         val bottomExpanded = 20.dp.toPx()
@@ -505,23 +541,11 @@ private val FadeThroughIn = fadeIn(tween(210, delayMillis = 90, easing = LinearO
     scaleIn(tween(210, delayMillis = 90, easing = LinearOutSlowInEasing), initialScale = 0.96f)
 private val FadeThroughOut = fadeOut(tween(90, easing = FastOutLinearInEasing))
 
-/** Диаметр точки-индикатора на кнопке истории. */
-private val BellDotSize = 10.dp
-
-/**
- * Сдвиг точки от центра кнопки так, чтобы она лежала на окружности: кнопка 48dp,
- * радиус 24dp, на углу 45° это 24 · cos45° ≈ 17dp по каждой оси.
- */
-private val BellDotOffset = 17.dp
-
-/** Появление/скрытие колокольчика — в ритме экранов: мягкий fade-through со сжатием. */
-private val BellIn = fadeIn(tween(210, delayMillis = 90, easing = LinearOutSlowInEasing)) +
-    scaleIn(tween(210, delayMillis = 90, easing = LinearOutSlowInEasing), initialScale = 0.8f)
-private val BellOut = fadeOut(tween(90, easing = FastOutLinearInEasing)) +
-    scaleOut(tween(90, easing = FastOutLinearInEasing), targetScale = 0.8f)
-
 private val CollapsedBarHeight = 64.dp
 private val ExpandedBarHeight = 120.dp
+
+/** Ширина кнопки в шапке — стандартная для M3 icon button. */
+private val BarActionWidth = 40.dp
 
 /** Плашка «нет связи»: данные показаны из кэша, с временем их сохранения. */
 @Composable
@@ -537,15 +561,18 @@ private fun OfflineBanner(savedAt: Long) {
         shape = MaterialTheme.shapes.large,
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 4.dp),
+            .padding(horizontal = Spacing.l, vertical = Spacing.xs),
     ) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
+            modifier = Modifier.padding(horizontal = Spacing.l, vertical = 10.dp),
         ) {
             Icon(Icons.Rounded.CloudOff, contentDescription = null, modifier = Modifier.size(20.dp))
-            Spacer(Modifier.width(12.dp))
-            Text("Нет связи · данные от $time", style = MaterialTheme.typography.labelLarge)
+            Spacer(Modifier.width(Spacing.m))
+            Text(
+                stringResource(R.string.offline_banner, time),
+                style = MaterialTheme.typography.labelLarge,
+            )
         }
     }
 }

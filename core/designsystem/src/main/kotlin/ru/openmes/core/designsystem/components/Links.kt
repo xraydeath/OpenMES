@@ -3,7 +3,6 @@ package ru.openmes.core.designsystem.components
 import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
-import android.widget.Toast
 import androidx.browser.customtabs.CustomTabsIntent
 import android.net.Uri
 
@@ -16,7 +15,7 @@ fun Context.openUrl(url: String) {
         try {
             startActivity(Intent(Intent.ACTION_VIEW, uri).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
         } catch (_: ActivityNotFoundException) {
-            Toast.makeText(this, "Нет приложения для открытия ссылки", Toast.LENGTH_SHORT).show()
+            mesSnackbar.show("Нет приложения для открытия ссылки")
         }
     }
 }

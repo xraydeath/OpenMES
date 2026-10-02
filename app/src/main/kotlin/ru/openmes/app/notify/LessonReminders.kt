@@ -13,6 +13,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import org.koin.core.context.GlobalContext
+import ru.openmes.app.R
 import ru.openmes.core.common.toHM
 import ru.openmes.core.data.NotificationDetails
 import ru.openmes.core.data.SettingsRepository
@@ -65,11 +66,16 @@ object LessonReminders {
         }
 
         val minutes = Duration.between(LocalTime.now(), start).toMinutes().coerceAtLeast(0)
-        val title = if (minutes > 0) "Через $minutes мин: $subject" else "Начинается: $subject"
+        val title = context.getString(
+            if (minutes > 0) R.string.notify_lesson_in else R.string.notify_lesson_now,
+            minutes,
+            subject,
+        )
         val text = listOfNotNull(
             start.toHM() + (end?.let { "–${it.toHM()}" } ?: ""),
-            "Дистанционно".takeIf { joinUrl != null || intent.getBooleanExtra(EXTRA_DISTANCE, false) },
-            intent.getStringExtra(EXTRA_ROOM)?.let { "каб. $it" },
+            context.getString(R.string.lesson_distance)
+                .takeIf { joinUrl != null || intent.getBooleanExtra(EXTRA_DISTANCE, false) },
+            intent.getStringExtra(EXTRA_ROOM)?.let { context.getString(R.string.lesson_room, it) },
             intent.getStringExtra(EXTRA_TEACHER),
         ).joinToString(" · ")
 
@@ -85,7 +91,7 @@ object LessonReminders {
                 Intent(Intent.ACTION_VIEW, Uri.parse(joinUrl)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
                 PendingIntent.FLAG_IMMUTABLE,
             )
-            builder.addAction(0, "Подключиться", join)
+            builder.addAction(0, context.getString(R.string.action_join), join)
         }
         Notifications.post(
             context, key.hashCode(), builder,
@@ -105,7 +111,7 @@ object LessonReminders {
             val lesson = upcomingLessons().firstOrNull { it.startTime != null }
             val intent = Intent()
                 .putExtra(EXTRA_KEY, "preview")
-                .putExtra(EXTRA_SUBJECT, lesson?.subjectName ?: "Математика")
+                .putExtra(EXTRA_SUBJECT, lesson?.subjectName ?: context.getString(R.string.sample_subject_math))
                 .putExtra(EXTRA_START, start.toString())
                 .putExtra(EXTRA_END, start.plusMinutes(90).toString())
                 .putExtra(EXTRA_ROOM, lesson?.room ?: "204")

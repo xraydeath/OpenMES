@@ -4,4 +4,127 @@
     <string name="widget_schedule_description">Ближайшие пары на сегодня или следующий учебный день</string>
     <string name="widget_day_description">К скольки приходить, сколько пар и до скольки занятия</string>
     <string name="app_name_full">OpenMES — Колледж МЭШ</string>
+    <string name="widget_schedule_label">Расписание</string>
+    <string name="widget_day_label">Учебный день</string>
+
+    <!-- Нижняя навигация -->
+    <string name="nav_schedule">Расписание</string>
+    <string name="nav_marks">Оценки</string>
+    <string name="nav_homework">Домашка</string>
+    <string name="nav_history">Уведомления</string>
+    <string name="nav_more">Ещё</string>
+
+    <!-- Заголовки экранов -->
+    <string name="title_schedule">Расписание</string>
+    <string name="title_marks">Оценки</string>
+    <string name="title_homework">Домашние задания</string>
+    <string name="title_more">Ещё</string>
+    <string name="title_attendance">Посещаемость</string>
+    <string name="title_visits">Проходы</string>
+    <string name="title_student_card">Студенческий билет</string>
+    <string name="title_food">Питание</string>
+    <string name="title_news">Новости</string>
+    <string name="title_news_single">Новость</string>
+    <string name="title_school_info">О колледже</string>
+    <string name="title_proforientation">Профориентация</string>
+    <string name="title_portfolio">Портфолио</string>
+    <string name="title_settings">Настройки</string>
+    <string name="title_cache_settings">Кэш и офлайн</string>
+    <string name="title_notification_settings">Уведомления</string>
+    <string name="title_notification_history">История уведомлений</string>
+    <string name="title_api_console">Консоль API</string>
+
+    <!-- Плашка блокировки -->
+    <string name="lock_prompt">Введите PIN-код</string>
+    <string name="lock_error_wrong_pin">Неверный PIN-код</string>
+    <string name="lock_error_locked_out">Слишком много попыток</string>
+    <string name="lock_retry_in">Повторите через %1$d:%2$02d</string>
+    <string name="lock_sign_in">Войти</string>
+    <string name="lock_sign_in_cd">Войти</string>
+    <string name="lock_erase_cd">Стереть</string>
+    <string name="lock_biometric_cd">Биометрия</string>
+    <string name="lock_biometric_title">Вход в OpenMES</string>
+    <string name="lock_biometric_negative">PIN-код</string>
+
+    <!-- Общее -->
+    <string name="action_back_cd">Назад</string>
+    <string name="bell_cd">История уведомлений</string>
+    <string name="bell_cd_unread">История уведомлений, непрочитанных: %1$d</string>
+    <string name="offline_banner">Нет связи · данные от %1$s</string>
+
+    <!-- Виджеты и уведомления: общие для обоих виджетов строки -->
+    <string name="widget_no_saved_schedule">Нет сохранённого расписания — откройте приложение</string>
+    <string name="widget_until">до %1$s</string>
+    <string name="widget_by">к %1$s</string>
+    <string name="widget_from">с %1$s</string>
+    <string name="widget_distance_only">Дистанционно</string>
+    <string name="widget_distance_from">дистанционно с %1$s</string>
+    <string name="day_today">Сегодня</string>
+    <string name="day_tomorrow">Завтра</string>
+    <string name="day_title_with_date">%1$s, %2$s</string>
+    <string name="lesson_distance">Дистанционно</string>
+    <string name="lesson_room">каб. %1$s</string>
+    <plurals name="widget_lessons">
+        <item quantity="one">%1$d урок</item>
+        <item quantity="few">%1$d урока</item>
+        <item quantity="many">%1$d уроков</item>
+        <item quantity="other">%1$d урока</item>
+    </plurals>
+    <plurals name="widget_pairs">
+        <item quantity="one">%1$d пара</item>
+        <item quantity="few">%1$d пары</item>
+        <item quantity="many">%1$d пар</item>
+        <item quantity="other">%1$d пары</item>
+    </plurals>
+
+    <!-- Каналы уведомлений -->
+    <string name="channel_marks">Новые оценки</string>
+    <string name="channel_lessons">Начало пар</string>
+    <string name="channel_schedule">Изменения в расписании</string>
+    <string name="channel_evening">ДЗ и контрольные на завтра</string>
+    <string name="channel_homework">Домашние задания</string>
+
+    <!-- Уведомления -->
+    <string name="action_join">Подключиться</string>
+    <string name="notify_lesson_in">Через %1$d мин: %2$s</string>
+    <string name="notify_lesson_now">Начинается: %2$s</string>
+    <string name="notify_default_test">Контрольная</string>
+    <string name="notify_tomorrow_named">Завтра: %1$s</string>
+    <string name="notify_schedule_changes_title">Изменения в расписании: %1$s</string>
+    <string name="notify_and_more"> и ещё %1$d</string>
+    <plurals name="notify_homework_tomorrow">
+        <item quantity="one">На завтра не сделано: %1$d задание</item>
+        <item quantity="few">На завтра не сделано: %1$d задания</item>
+        <item quantity="many">На завтра не сделано: %1$d заданий</item>
+        <item quantity="other">На завтра не сделано: %1$d задания</item>
+    </plurals>
+    <plurals name="notify_tests_tomorrow">
+        <item quantity="one">Завтра контрольных: %1$d</item>
+        <item quantity="few">Завтра контрольных: %1$d</item>
+        <item quantity="many">Завтра контрольных: %1$d</item>
+        <item quantity="other">Завтра контрольных: %1$d</item>
+    </plurals>
+
+    <!-- Примеры уведомлений из настроек -->
+    <string name="sample_subject_math">Математика</string>
+    <string name="sample_subject_inf">Информатика</string>
+    <string name="sample_mark_math">Оценка 5 (вес 2) · Контрольная работа · за сегодня</string>
+    <string name="sample_mark_changed">Оценка изменена: 4 → 5 · за сегодня</string>
+    <string name="sample_homework_new">Новое задание: §12, задачи 1–5 · на завтра</string>
+    <string name="sample_homework_changed">Задание изменилось: §12, задачи 1–12 · на завтра</string>
+    <string name="sample_schedule_title">Расписание изменено</string>
+    <string name="sample_schedule_changed">Математика перенесена на 2-ю пару, кабинет 214 · завтра</string>
+
+    <!-- Описание изменений расписания -->
+    <string name="diff_replaced">%1$s замена: %2$s → %3$s</string>
+    <string name="diff_cancelled">%1$s отменена: %2$s</string>
+    <string name="diff_added">%1$s новая пара: %2$s%3$s</string>
+    <string name="diff_moved">перенос %1$s → %2$s</string>
+    <string name="diff_now_distance">теперь дистанционно</string>
+    <string name="diff_now_online">теперь очно</string>
+    <string name="diff_room">кабинет %1$s → %2$s</string>
+    <string name="diff_teacher">преподаватель: %1$s</string>
+    <string name="diff_summary">%1$s %2$s: %3$s</string>
+    <string name="diff_where_distance"> (дистанционно)</string>
+    <string name="diff_where_room"> (каб. %1$s)</string>
 </resources>

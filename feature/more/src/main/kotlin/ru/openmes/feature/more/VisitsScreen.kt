@@ -19,7 +19,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.unit.dp
+import androidx.compose.ui.res.stringResource
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
@@ -47,8 +47,10 @@ import ru.openmes.core.designsystem.components.ScrollableFill
 import ru.openmes.core.designsystem.components.SectionHeader
 import ru.openmes.core.designsystem.components.StatValue
 import ru.openmes.core.designsystem.components.groupShape
+import ru.openmes.core.designsystem.theme.Spacing
 import ru.openmes.core.model.Visit
 import ru.openmes.core.model.VisitDay
+import ru.openmes.feature.more.R
 import java.time.Duration
 import java.time.LocalDate
 import java.time.LocalTime
@@ -144,7 +146,7 @@ fun VisitsScreen(viewModel: VisitsViewModel) {
             state.loading && state.days.isEmpty() -> LoadingState()
             else -> LazyColumn(
                 modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 24.dp),
+                contentPadding = PaddingValues(start = Spacing.l, end = Spacing.l, top = Spacing.s, bottom = Spacing.xl),
                 verticalArrangement = Arrangement.spacedBy(GroupGap),
             ) {
                 item { VisitsSummary(days, state.from) }
@@ -152,8 +154,8 @@ fun VisitsScreen(viewModel: VisitsViewModel) {
                     item {
                         EmptyState(
                             icon = Icons.Rounded.NoMeetingRoom,
-                            title = "Проходов нет",
-                            subtitle = "За этот период турникеты не отмечали входов",
+                            title = stringResource(R.string.more_visits_empty_title),
+                            subtitle = stringResource(R.string.more_visits_empty_sub),
                         )
                     }
                 }
@@ -165,7 +167,7 @@ fun VisitsScreen(viewModel: VisitsViewModel) {
                             trailing = {
                                 day.totalMinutes().takeIf { it > 0 }?.let {
                                     Text(
-                                        formatMinutes(it),
+                                        durationText(it),
                                         style = MaterialTheme.typography.labelLarge,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     )
@@ -182,12 +184,12 @@ fun VisitsScreen(viewModel: VisitsViewModel) {
                         onClick = viewModel::loadMore,
                         enabled = !state.loadingMore && !state.loading,
                         shapes = ButtonDefaults.shapes(),
-                        modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
+                        modifier = Modifier.fillMaxWidth().padding(top = Spacing.m),
                     ) {
                         if (state.loadingMore) {
-                            LoadingIndicator(Modifier.padding(end = 8.dp))
+                            LoadingIndicator(Modifier.padding(end = Spacing.s))
                         }
-                        Text("Показать ещё 4 недели")
+                        Text(stringResource(R.string.more_visits_load_more))
                     }
                 }
             }
@@ -201,24 +203,24 @@ private fun VisitsSummary(days: List<VisitDay>, from: LocalDate) {
     val firstIns = days.mapNotNull { day -> day.visits.mapNotNull { it.entered }.minOrNull() }
     HeroCard {
         Text(
-            "С ${from.humanize()} по сегодня",
+            stringResource(R.string.more_visits_period, from.humanize()),
             style = MaterialTheme.typography.titleMediumEmphasized,
         )
         Row(
             Modifier
                 .fillMaxWidth()
-                .padding(top = 16.dp),
+                .padding(top = Spacing.l),
             horizontalArrangement = Arrangement.SpaceAround,
         ) {
-            StatValue(days.size.toString(), "дней\nв колледже", color = MaterialTheme.colorScheme.primary)
+            StatValue(days.size.toString(), stringResource(R.string.more_visits_stat_days), color = MaterialTheme.colorScheme.primary)
             StatValue(
-                if (minutes.isEmpty()) "—" else formatMinutes(minutes.average().toLong()),
-                "в среднем\nза день",
+                if (minutes.isEmpty()) "—" else durationText(minutes.average().toLong()),
+                stringResource(R.string.more_visits_stat_average),
                 color = MaterialTheme.colorScheme.primary,
             )
             StatValue(
                 firstIns.averageTime()?.toHM() ?: "—",
-                "средний\nприход",
+                stringResource(R.string.more_visits_stat_arrival),
                 color = MaterialTheme.colorScheme.primary,
             )
         }
@@ -232,7 +234,8 @@ private fun VisitItem(visit: Visit, modifier: Modifier, shape: androidx.compose.
         headline = times,
         supporting = listOfNotNull(
             visit.duration,
-            "нет отметки ${if (visit.entered == null) "входа" else "выхода"}".takeIf { visit.incomplete },
+            stringResource(if (visit.entered == null) R.string.more_visits_no_mark_in else R.string.more_visits_no_mark_out)
+                .takeIf { visit.incomplete },
             visit.place,
         ).joinToString(" · ").ifBlank { null },
         icon = Icons.Rounded.DoorFront,
@@ -250,4 +253,7 @@ private fun VisitDay.totalMinutes(): Long = visits.sumOf { v ->
 private fun List<LocalTime>.averageTime(): LocalTime? =
     takeIf { it.isNotEmpty() }?.let { list -> LocalTime.ofSecondOfDay(list.map { it.toSecondOfDay().toLong() }.average().toLong()) }
 
-private fun formatMinutes(total: Long): String = "${total / 60} ч ${total % 60} мин"
+/** Длительность в часах и минутах — часы/минуты всегда разделены ресурсом. */
+@Composable
+private fun durationText(total: Long): String =
+    stringResource(R.string.more_visits_duration, total / 60, total % 60)

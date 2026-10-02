@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
@@ -31,6 +32,7 @@ import androidx.compose.material.icons.rounded.Storage
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialShapes
 import androidx.compose.material3.MaterialTheme
@@ -52,9 +54,11 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import kotlin.math.roundToInt
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import ru.openmes.core.data.ThemeMode
@@ -66,6 +70,7 @@ import ru.openmes.core.designsystem.components.MesListItem
 import ru.openmes.core.designsystem.components.SectionHeader
 import ru.openmes.core.designsystem.components.ShapeIcon
 import ru.openmes.core.designsystem.components.groupShape
+import ru.openmes.core.designsystem.theme.Spacing
 
 /**
  * Настройки: тема (в духе expressive), Material You, уведомления, PIN/биометрия, о приложении.
@@ -93,25 +98,36 @@ fun SettingsScreen(
         )
     }
 
+    // Подписи тем разворачиваем заранее: label у ConnectedChoiceGroup — обычная функция.
+    val themeLabels = ThemeMode.entries.associateWith {
+        stringResource(
+            when (it) {
+                ThemeMode.SYSTEM -> R.string.more_settings_theme_system
+                ThemeMode.LIGHT -> R.string.more_settings_theme_light
+                ThemeMode.DARK -> R.string.more_settings_theme_dark
+            },
+        )
+    }
+
     // Строки групп собираем списками: форма зависит от позиции в группе.
-    val appearance = listOf<@Composable (Shape) -> Unit>(
-        { shape ->
+    val appearance = buildList<@Composable (Shape) -> Unit> {
+        add { shape ->
             SwitchItem(
                 icon = Icons.Rounded.Palette,
-                title = "Динамический цвет",
-                subtitle = "Material You: палитра из обоев (Android 12+)",
+                title = stringResource(R.string.more_settings_dynamic_color),
+                subtitle = stringResource(R.string.more_settings_dynamic_color_sub),
                 checked = settings.dynamicColor,
                 onCheckedChange = viewModel::setDynamicColor,
                 shape = shape,
             )
-        },
-    )
+        }
+    }
     val security = buildList<@Composable (Shape) -> Unit> {
         add { shape ->
             SwitchItem(
                 icon = Icons.Rounded.Pin,
-                title = "PIN-код",
-                subtitle = "При запуске и после минуты в фоне",
+                title = stringResource(R.string.more_settings_pin),
+                subtitle = stringResource(R.string.more_settings_pin_sub),
                 checked = settings.pinEnabled,
                 onCheckedChange = { enabled -> if (enabled) pinDialog = true else viewModel.setPin(null) },
                 shape = shape,
@@ -121,8 +137,8 @@ fun SettingsScreen(
             add { shape ->
                 SwitchItem(
                     icon = Icons.Rounded.Fingerprint,
-                    title = "Биометрия",
-                    subtitle = "Разблокировка отпечатком или лицом",
+                    title = stringResource(R.string.more_settings_biometric),
+                    subtitle = stringResource(R.string.more_settings_biometric_sub),
                     checked = settings.biometricEnabled,
                     enabled = settings.pinEnabled,
                     onCheckedChange = viewModel::setBiometricEnabled,
@@ -133,7 +149,7 @@ fun SettingsScreen(
         if (settings.pinEnabled) {
             add { shape ->
                 MesListItem(
-                    headline = "Сменить PIN-код",
+                    headline = stringResource(R.string.more_settings_change_pin),
                     icon = Icons.Rounded.Password,
                     onClick = { pinDialog = true },
                     shape = shape,
@@ -144,24 +160,19 @@ fun SettingsScreen(
 
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 24.dp),
+        contentPadding = PaddingValues(start = Spacing.l, end = Spacing.l, top = Spacing.s, bottom = Spacing.xl),
         verticalArrangement = Arrangement.spacedBy(GroupGap),
     ) {
-        item { SectionHeader("Оформление") }
+        item { SectionHeader(stringResource(R.string.more_settings_appearance)) }
         item {
             MesCard(shape = groupShape(0, appearance.size + 1)) {
-                Text("Тема", style = MaterialTheme.typography.titleMedium)
+                Text(stringResource(R.string.more_settings_theme), style = MaterialTheme.typography.titleMedium)
                 ConnectedChoiceGroup(
                     options = ThemeMode.entries,
                     selected = settings.themeMode,
                     onSelect = viewModel::setThemeMode,
-                    label = {
-                        when (it) {
-                            ThemeMode.SYSTEM -> "Система"
-                            ThemeMode.LIGHT -> "Светлая"
-                            ThemeMode.DARK -> "Тёмная"
-                        }
-                    },
+                    // label у ConnectedChoiceGroup — обычная функция, подписи разворачиваем заранее.
+                    label = { themeLabels.getValue(it) },
                     icon = {
                         when (it) {
                             ThemeMode.SYSTEM -> Icons.Rounded.BrightnessAuto
@@ -169,45 +180,54 @@ fun SettingsScreen(
                             ThemeMode.DARK -> Icons.Rounded.DarkMode
                         }
                     },
-                    modifier = Modifier.padding(top = 12.dp),
+                    modifier = Modifier.padding(top = Spacing.m),
                 )
             }
         }
         group(appearance, offset = 1)
 
-        item { SectionHeader("Уведомления", Modifier.padding(top = 12.dp)) }
+        item { SectionHeader(stringResource(R.string.more_notif_section), Modifier.padding(top = Spacing.m)) }
         item {
             val enabled = listOfNotNull(
-                "оценки".takeIf { settings.marksNotifications },
-                "пары".takeIf { settings.lessonReminders },
-                "расписание".takeIf { settings.scheduleChangeNotifications },
-                "ДЗ".takeIf { settings.homeworkReminders },
-                "контрольные".takeIf { settings.testReminders },
+                stringResource(R.string.more_notif_short_marks).takeIf { settings.marksNotifications },
+                stringResource(R.string.more_notif_short_homework_changes).takeIf { settings.homeworkChangeNotifications },
+                stringResource(R.string.more_notif_short_lessons).takeIf { settings.lessonReminders },
+                stringResource(R.string.more_notif_short_schedule).takeIf { settings.scheduleChangeNotifications },
+                stringResource(R.string.more_notif_short_homework).takeIf { settings.homeworkReminders },
+                stringResource(R.string.more_notif_short_tests).takeIf { settings.testReminders },
             )
             MesListItem(
-                headline = "Уведомления",
-                supporting = if (enabled.isEmpty()) "Выключены" else enabled.joinToString(", ").replaceFirstChar(Char::uppercase),
+                headline = stringResource(R.string.more_notif_section),
+                supporting = if (enabled.isEmpty()) {
+                    stringResource(R.string.more_notif_all_off)
+                } else {
+                    enabled.joinToString(", ").replaceFirstChar(Char::uppercase)
+                },
                 icon = Icons.Rounded.NotificationsActive,
                 onClick = onOpenNotifications,
                 shape = groupShape(0, 1),
             )
         }
 
-        item { SectionHeader("Безопасность", Modifier.padding(top = 12.dp)) }
+        item { SectionHeader(stringResource(R.string.more_settings_security), Modifier.padding(top = Spacing.m)) }
         group(security)
 
-        item { SectionHeader("Данные", Modifier.padding(top = 12.dp)) }
+        item { SectionHeader(stringResource(R.string.more_settings_data), Modifier.padding(top = Spacing.m)) }
         item {
             MesListItem(
-                headline = "Кэш и офлайн",
-                supporting = if (settings.cacheEnabled) "Включён · разделы и период данных" else "Выключен",
+                headline = stringResource(R.string.more_settings_cache),
+                supporting = if (settings.cacheEnabled) {
+                    stringResource(R.string.more_settings_cache_on)
+                } else {
+                    stringResource(R.string.more_settings_cache_off)
+                },
                 icon = Icons.Rounded.Storage,
                 onClick = onOpenCache,
                 shape = groupShape(0, 1),
             )
         }
 
-        item { SectionHeader("О приложении", Modifier.padding(top = 12.dp)) }
+        item { SectionHeader(stringResource(R.string.more_settings_about), Modifier.padding(top = Spacing.m)) }
         item {
             HeroCard(
                 containerColor = MaterialTheme.colorScheme.tertiaryContainer,
@@ -215,7 +235,7 @@ fun SettingsScreen(
             ) {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(16.dp),
+                    horizontalArrangement = Arrangement.spacedBy(Spacing.l),
                 ) {
                     ShapeIcon(
                         icon = Icons.Rounded.School,
@@ -225,7 +245,10 @@ fun SettingsScreen(
                         size = 56.dp,
                     )
                     Column {
-                        Text("OpenMES", style = MaterialTheme.typography.titleLargeEmphasized)
+                        Text(
+                            stringResource(R.string.more_settings_app_name),
+                            style = MaterialTheme.typography.titleLargeEmphasized,
+                        )
                         val version = remember {
                             runCatching { context.packageManager.getPackageInfo(context.packageName, 0).versionName }.getOrNull()
                         }
@@ -233,7 +256,7 @@ fun SettingsScreen(
                         // null в релизе — вход закрыт.
                         var versionTaps by remember { mutableIntStateOf(0) }
                         Text(
-                            "Версия ${version.orEmpty()}",
+                            stringResource(R.string.more_settings_version, version.orEmpty()),
                             style = MaterialTheme.typography.bodySmall,
                             modifier = if (onOpenApiConsole != null) Modifier.clickable(
                                 interactionSource = null,
@@ -248,16 +271,15 @@ fun SettingsScreen(
                     }
                 }
                 Text(
-                    "Открытый клиент «Колледжа МЭШ» на Material Design 3 Expressive.\n" +
-                        "Данные получаются только с ваших аккаунтов через официальные API school.mos.ru.",
+                    stringResource(R.string.more_settings_about_text),
                     style = MaterialTheme.typography.bodyMedium,
-                    modifier = Modifier.padding(top = 16.dp),
+                    modifier = Modifier.padding(top = Spacing.l),
                 )
                 Text(
-                    "Не является официальным приложением Департамента образования и науки города Москвы.",
+                    stringResource(R.string.more_settings_about_disclaimer),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onTertiaryContainer.copy(alpha = 0.75f),
-                    modifier = Modifier.padding(top = 8.dp),
+                    modifier = Modifier.padding(top = Spacing.s),
                 )
             }
         }
@@ -315,13 +337,13 @@ private fun PinSetupDialog(onDismiss: () -> Unit, onConfirm: (String) -> Unit) {
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("PIN-код") },
+        title = { Text(stringResource(R.string.more_settings_pin_dialog_title)) },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Column(verticalArrangement = Arrangement.spacedBy(Spacing.s)) {
                 OutlinedTextField(
                     value = first,
                     onValueChange = { v -> first = v.filter(Char::isDigit).take(8) },
-                    label = { Text("Новый PIN (4–8 цифр)") },
+                    label = { Text(stringResource(R.string.more_settings_pin_new)) },
                     singleLine = true,
                     visualTransformation = PasswordVisualTransformation(),
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
@@ -329,11 +351,11 @@ private fun PinSetupDialog(onDismiss: () -> Unit, onConfirm: (String) -> Unit) {
                 OutlinedTextField(
                     value = second,
                     onValueChange = { v -> second = v.filter(Char::isDigit).take(8) },
-                    label = { Text("Повторите PIN") },
+                    label = { Text(stringResource(R.string.more_settings_pin_repeat)) },
                     singleLine = true,
                     isError = mismatch,
                     supportingText = if (mismatch) {
-                        { Text("PIN-коды не совпадают") }
+                        { Text(stringResource(R.string.more_settings_pin_mismatch)) }
                     } else {
                         null
                     },
@@ -347,10 +369,10 @@ private fun PinSetupDialog(onDismiss: () -> Unit, onConfirm: (String) -> Unit) {
                 onClick = { onConfirm(first) },
                 enabled = !tooShort && second == first,
                 shapes = ButtonDefaults.shapes(),
-            ) { Text("Сохранить") }
+            ) { Text(stringResource(R.string.more_action_save)) }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss, shapes = ButtonDefaults.shapes()) { Text("Отмена") }
+            TextButton(onClick = onDismiss, shapes = ButtonDefaults.shapes()) { Text(stringResource(R.string.more_action_cancel)) }
         },
         icon = { Icon(Icons.Rounded.Pin, contentDescription = null) },
     )

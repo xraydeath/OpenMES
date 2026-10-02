@@ -70,6 +70,7 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import ru.openmes.core.common.toRuDate
 import ru.openmes.core.common.toShortRu
+import ru.openmes.core.designsystem.theme.Spacing
 import java.time.DayOfWeek
 import java.time.LocalDate
 import java.time.temporal.ChronoUnit
@@ -257,7 +258,7 @@ fun WeekBar(
     }
 
     val shownMonday = firstMonday.plusWeeks(weekPager.currentPage.toLong())
-    Column(Modifier.padding(horizontal = 12.dp, vertical = 4.dp)) {
+    Column(Modifier.padding(horizontal = Spacing.m, vertical = Spacing.xs)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             FilledTonalIconButton(
                 onClick = { goWeek(-1) },
@@ -336,13 +337,13 @@ fun WeekBar(
         }
         HorizontalPager(
             state = weekPager,
-            modifier = Modifier.padding(top = 4.dp),
+            modifier = Modifier.padding(top = Spacing.xs),
             flingBehavior = rememberShortSwipeFling(weekPager),
         ) { week ->
             val monday = firstMonday.plusWeeks(week.toLong())
             Row(
                 Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                horizontalArrangement = Arrangement.spacedBy(Spacing.xs),
             ) {
                 repeat(7) { i ->
                     val date = monday.plusDays(i.toLong())
@@ -437,7 +438,7 @@ private fun DayChip(
             // Место под точку есть всегда — числа в соседних днях не прыгают.
             Box(
                 Modifier
-                    .padding(top = 2.dp)
+                    .padding(top = Spacing.xxs)
                     .size(5.dp)
                     .background(
                         when {

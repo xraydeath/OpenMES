@@ -26,7 +26,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.unit.dp
+import androidx.compose.ui.res.stringResource
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
@@ -50,6 +50,7 @@ import ru.openmes.core.designsystem.components.SectionHeader
 import ru.openmes.core.designsystem.components.StatusPill
 import ru.openmes.core.designsystem.components.groupShape
 import ru.openmes.core.designsystem.components.openUrl
+import ru.openmes.core.designsystem.theme.Spacing
 import ru.openmes.core.model.SchoolInfo
 
 class SchoolInfoViewModel(
@@ -113,7 +114,11 @@ fun SchoolInfoScreen(viewModel: SchoolInfoViewModel) {
         when {
             state.loading && info == null -> LoadingState()
             info == null -> ScrollableFill {
-                ErrorState(title = "Сведения о колледже недоступны", onRetry = viewModel::refresh, details = state.error)
+                ErrorState(
+                    title = stringResource(R.string.more_school_error),
+                    onRetry = viewModel::refresh,
+                    details = state.error,
+                )
             }
 
             else -> {
@@ -121,27 +126,43 @@ fun SchoolInfoScreen(viewModel: SchoolInfoViewModel) {
                     context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(uri)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
                 }
                 val people = buildList {
-                    info.principal?.let { add(InfoRow(Icons.Rounded.Person, it, "Директор")) }
-                    info.curators.forEach { add(InfoRow(Icons.Rounded.SupervisorAccount, it, "Куратор группы")) }
+                    info.principal?.let { add(InfoRow(Icons.Rounded.Person, it, stringResource(R.string.more_school_principal))) }
+                    info.curators.forEach {
+                        add(InfoRow(Icons.Rounded.SupervisorAccount, it, stringResource(R.string.more_school_curator)))
+                    }
                 }
-                val contacts = buildList {
+                val contacts = buildList<InfoRow> {
                     info.address?.let { a ->
-                        add(InfoRow(Icons.Rounded.Place, a, "Адрес") { dial("geo:0,0?q=" + Uri.encode(a)) })
-                    }
-                    info.phone?.let { p ->
-                        add(InfoRow(Icons.Rounded.Call, p, "Телефон") { dial("tel:" + p.filter { it.isDigit() || it == '+' }) })
-                    }
-                    info.email?.let { e -> add(InfoRow(Icons.Rounded.Email, e, "Почта") { dial("mailto:$e") }) }
-                    info.website?.let { w ->
-                        add(InfoRow(Icons.Rounded.Language, w, "Сайт") {
-                            context.openUrl(if (w.startsWith("http")) w else "https://$w")
+                        add(InfoRow(Icons.Rounded.Place, a, stringResource(R.string.more_school_address)) {
+                            dial("geo:0,0?q=" + Uri.encode(a))
                         })
                     }
+                    info.phone?.let { p ->
+                        add(InfoRow(Icons.Rounded.Call, p, stringResource(R.string.more_school_phone)) {
+                            dial("tel:" + p.filter { it.isDigit() || it == '+' })
+                        })
+                    }
+                    info.email?.let { e ->
+                        add(InfoRow(Icons.Rounded.Email, e, stringResource(R.string.more_school_email)) { dial("mailto:$e") })
+                    }
+                    info.website?.let { w ->
+                        add(
+                            InfoRow(
+                                icon = Icons.Rounded.Language,
+                                headline = w,
+                                supporting = stringResource(R.string.more_school_site),
+                                onClick = { context.openUrl(if (w.startsWith("http")) w else "https://$w") },
+                            ),
+                        )
+                    }
                 }
+                // Содержимое LazyColumn — обычная функция, заголовки групп разворачиваем здесь.
+                val peopleTitle = stringResource(R.string.more_school_people)
+                val contactsTitle = stringResource(R.string.more_school_contacts)
 
                 LazyColumn(
                     modifier = Modifier.fillMaxSize(),
-                    contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 24.dp),
+                    contentPadding = PaddingValues(start = Spacing.l, end = Spacing.l, top = Spacing.s, bottom = Spacing.xl),
                     verticalArrangement = Arrangement.spacedBy(GroupGap),
                 ) {
                     item {
@@ -149,10 +170,15 @@ fun SchoolInfoScreen(viewModel: SchoolInfoViewModel) {
                             Text(info.name, style = MaterialTheme.typography.titleLargeEmphasized)
                         }
                     }
-                    infoGroup("Люди", people)
-                    infoGroup("Контакты", contacts)
+                    infoGroup(peopleTitle, people)
+                    infoGroup(contactsTitle, contacts)
                     if (info.branches.isNotEmpty()) {
-                        item { SectionHeader("Корпуса · ${info.branches.size}", Modifier.padding(top = 12.dp)) }
+                        item {
+                            SectionHeader(
+                                stringResource(R.string.more_school_branches, info.branches.size),
+                                Modifier.padding(top = Spacing.m),
+                            )
+                        }
                         itemsIndexed(info.branches) { index, b ->
                             MesListItem(
                                 headline = b.name.ifBlank { b.address.orEmpty() },
@@ -162,8 +188,8 @@ fun SchoolInfoScreen(viewModel: SchoolInfoViewModel) {
                                 iconContainerColor = if (b.isStudentBuilding) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.secondaryContainer,
                                 iconContentColor = if (b.isStudentBuilding) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSecondaryContainer,
                                 trailingContent = when {
-                                    b.isStudentBuilding -> ({ StatusPill("мой") })
-                                    b.isMain -> ({ StatusPill("главный") })
+                                    b.isStudentBuilding -> ({ StatusPill(stringResource(R.string.more_school_branch_mine)) })
+                                    b.isMain -> ({ StatusPill(stringResource(R.string.more_school_branch_main)) })
                                     else -> null
                                 },
                                 onClick = b.address?.let { a -> { dial("geo:0,0?q=" + Uri.encode(a)) } },
@@ -179,7 +205,7 @@ fun SchoolInfoScreen(viewModel: SchoolInfoViewModel) {
 
 private fun androidx.compose.foundation.lazy.LazyListScope.infoGroup(title: String, rows: List<InfoRow>) {
     if (rows.isEmpty()) return
-    item { SectionHeader(title, Modifier.padding(top = 12.dp)) }
+    item { SectionHeader(title, Modifier.padding(top = Spacing.m)) }
     itemsIndexed(rows) { index, row ->
         MesListItem(
             headline = row.headline,

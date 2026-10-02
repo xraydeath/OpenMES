@@ -37,7 +37,9 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.annotation.StringRes
 import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -68,11 +70,13 @@ import ru.openmes.core.designsystem.components.ScrollableFill
 import ru.openmes.core.designsystem.components.SectionHeader
 import ru.openmes.core.designsystem.components.StatusPill
 import ru.openmes.core.designsystem.components.groupShape
+import ru.openmes.core.designsystem.theme.Spacing
 import ru.openmes.core.model.Buffet
 import ru.openmes.core.model.Dish
 import ru.openmes.core.model.FoodBalance
 import ru.openmes.core.model.FoodComplex
 import ru.openmes.core.model.FoodDay
+import ru.openmes.feature.more.R
 import java.time.DayOfWeek
 import java.time.LocalDate
 import java.util.Locale
@@ -209,10 +213,10 @@ class FoodViewModel(
     }
 }
 
-private enum class FoodTab(val title: String) {
-    Canteen("Столовая"),
-    Buffet("Буфет"),
-    Account("Счёт"),
+private enum class FoodTab(@StringRes val title: Int) {
+    Canteen(R.string.more_food_tab_canteen),
+    Buffet(R.string.more_food_tab_buffet),
+    Account(R.string.more_food_tab_account),
 }
 
 private const val TRANSACTIONS_DAYS = 30L
@@ -227,6 +231,10 @@ fun FoodScreen(viewModel: FoodViewModel) {
     var tab by rememberSaveable { mutableStateOf(FoodTab.Canteen) }
     val day = state.days[state.selected]
     val uriHandler = LocalUriHandler.current
+    // Содержимое LazyColumn — обычная функция, строки для неё разворачиваем здесь.
+    val tabLabels = FoodTab.entries.associateWith { stringResource(it.title) }
+    val otherCategory = stringResource(R.string.more_food_category_other)
+    val accountRowList = accountRows(state.balance)
 
     Column(Modifier.fillMaxSize()) {
         FoodWeekBar(
@@ -247,7 +255,7 @@ fun FoodScreen(viewModel: FoodViewModel) {
                 state.loading && state.days.isEmpty() -> LoadingState()
                 else -> LazyColumn(
                     modifier = Modifier.fillMaxSize(),
-                    contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 24.dp),
+                    contentPadding = PaddingValues(start = Spacing.l, end = Spacing.l, top = Spacing.s, bottom = Spacing.xl),
                     verticalArrangement = Arrangement.spacedBy(GroupGap),
                 ) {
                     item { FoodSummary(state.selected, day, state.balance, state.provider) }
@@ -256,15 +264,15 @@ fun FoodScreen(viewModel: FoodViewModel) {
                             options = FoodTab.entries,
                             selected = tab,
                             onSelect = { tab = it },
-                            label = { it.title },
-                            modifier = Modifier.padding(top = 12.dp, bottom = 4.dp),
+                            label = { tabLabels.getValue(it) },
+                            modifier = Modifier.padding(top = Spacing.m, bottom = Spacing.xs),
                         )
                     }
                     when (tab) {
                         FoodTab.Canteen -> canteen(day)
-                        FoodTab.Buffet -> buffet(day?.buffet)
+                        FoodTab.Buffet -> buffet(day?.buffet, otherCategory)
                         FoodTab.Account -> account(
-                            balance = state.balance,
+                            rows = accountRowList,
                             transactions = state.transactions,
                             failed = state.transactionsFailed,
                             onTopUp = { runCatching { uriHandler.openUri(TOP_UP_URL) } },
@@ -282,9 +290,9 @@ private fun LazyListScope.canteen(day: FoodDay?) {
         item {
             EmptyState(
                 icon = Icons.Rounded.NoFood,
-                title = "Меню нет",
-                subtitle = "На этот день комплексы не опубликованы",
-                modifier = Modifier.padding(top = 32.dp),
+                title = stringResource(R.string.more_food_empty_title),
+                subtitle = stringResource(R.string.more_food_empty_sub),
+                modifier = Modifier.padding(top = Spacing.xxl),
             )
         }
         return
@@ -297,20 +305,21 @@ private fun LazyListScope.canteen(day: FoodDay?) {
     }
 }
 
-private fun LazyListScope.buffet(buffet: Buffet?) {
+private fun LazyListScope.buffet(buffet: Buffet?, otherCategory: String) {
     if (buffet == null || buffet.dishes.isEmpty()) {
         item {
             EmptyState(
                 icon = Icons.Rounded.Storefront,
-                title = "Ассортимент не опубликован",
-                subtitle = buffet?.hoursText()?.let { "Буфет работает $it" } ?: "Буфет на этот день не найден",
-                modifier = Modifier.padding(top = 32.dp),
+                title = stringResource(R.string.more_food_buffet_empty),
+                subtitle = buffet?.hoursText()?.let { stringResource(R.string.more_food_buffet_hours, it) }
+                    ?: stringResource(R.string.more_food_buffet_missing),
+                modifier = Modifier.padding(top = Spacing.xxl),
             )
         }
         return
     }
-    buffet.dishes.groupBy { it.category ?: "Прочее" }.forEach { (category, dishes) ->
-        item(key = "b_$category") { SectionHeader(category, Modifier.padding(top = 12.dp)) }
+    buffet.dishes.groupBy { it.category ?: otherCategory }.forEach { (category, dishes) ->
+        item(key = "b_$category") { SectionHeader(category, Modifier.padding(top = Spacing.m)) }
         itemsIndexed(dishes, key = { i, d -> "b_${d.id}_$i" }) { index, dish ->
             DishItem(dish, shape = groupShape(index, dishes.size), showPrice = true)
         }
@@ -318,19 +327,14 @@ private fun LazyListScope.buffet(buffet: Buffet?) {
 }
 
 private fun LazyListScope.account(
-    balance: FoodBalance?,
+    rows: List<Pair<String, String>>,
     transactions: List<FoodTransaction>?,
     failed: Boolean,
     onTopUp: () -> Unit,
 ) {
-    val rows = listOfNotNull(
-        balance?.contractId?.let { "Лицевой счёт" to "№ $it" },
-        "Дневной лимит трат" to (balance?.dayLimit?.let(::formatRub) ?: "не задан"),
-        "Предупреждать при остатке ниже" to (balance?.lowBalanceThreshold?.let(::formatRub) ?: "не задано"),
-    )
-    item { SectionHeader("Лицевой счёт", Modifier.padding(top = 12.dp)) }
+    item { SectionHeader(stringResource(R.string.more_food_account_title), Modifier.padding(top = Spacing.m)) }
     itemsIndexed(rows, key = { _, r -> "acc_${r.first}" }) { index, (title, value) ->
-        MesCard(shape = groupShape(index, rows.size), contentPadding = PaddingValues(horizontal = 16.dp, vertical = 14.dp)) {
+        MesCard(shape = groupShape(index, rows.size), contentPadding = PaddingValues(horizontal = Spacing.l, vertical = 14.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(title, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
                 Text(value, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary)
@@ -343,25 +347,25 @@ private fun LazyListScope.account(
             shapes = ButtonDefaults.shapes(),
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(top = 8.dp),
+                .padding(top = Spacing.s),
         ) {
             Icon(Icons.AutoMirrored.Rounded.OpenInNew, contentDescription = null)
-            Text("Пополнить на newpay.mos.ru", Modifier.padding(start = 8.dp))
+            Text(stringResource(R.string.more_food_top_up), Modifier.padding(start = Spacing.s))
         }
     }
 
-    item { SectionHeader("Операции за $TRANSACTIONS_DAYS дней", Modifier.padding(top = 12.dp)) }
+    item { SectionHeader(stringResource(R.string.more_food_ops_header, TRANSACTIONS_DAYS), Modifier.padding(top = Spacing.m)) }
     when {
         transactions.isNullOrEmpty() -> item {
             EmptyState(
                 icon = Icons.AutoMirrored.Rounded.ReceiptLong,
                 title = when {
-                    transactions != null -> "Покупок пока не было"
-                    failed -> "Не удалось загрузить операции"
-                    else -> "Загружаем операции…"
+                    transactions != null -> stringResource(R.string.more_food_ops_empty)
+                    failed -> stringResource(R.string.more_food_ops_failed)
+                    else -> stringResource(R.string.more_food_ops_loading)
                 },
-                subtitle = if (transactions != null) "Операций по счёту за этот период нет" else null,
-                modifier = Modifier.padding(top = 16.dp),
+                subtitle = if (transactions != null) stringResource(R.string.more_food_ops_empty_sub) else null,
+                modifier = Modifier.padding(top = Spacing.l),
             )
         }
         else -> itemsIndexed(transactions, key = { i, _ -> "tx_$i" }) { index, tx ->
@@ -372,10 +376,13 @@ private fun LazyListScope.account(
 
 @Composable
 private fun TransactionItem(tx: FoodTransaction, shape: Shape) {
-    MesCard(shape = shape, contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp)) {
+    MesCard(shape = shape, contentPadding = PaddingValues(horizontal = Spacing.l, vertical = Spacing.m)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
-                Text(tx.title ?: tx.type ?: "Операция", style = MaterialTheme.typography.titleMedium)
+                Text(
+                    tx.title ?: tx.type ?: stringResource(R.string.more_food_tx_default),
+                    style = MaterialTheme.typography.titleMedium,
+                )
                 val meta = listOfNotNull(
                     tx.date?.let { "${it.toLocalDate().humanize()}, ${it.toLocalTime().toHM()}" },
                     tx.type?.takeIf { tx.title != null },
@@ -389,7 +396,7 @@ private fun TransactionItem(tx: FoodTransaction, shape: Shape) {
                     formatRub(it),
                     style = MaterialTheme.typography.titleMedium,
                     color = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.padding(start = 12.dp),
+                    modifier = Modifier.padding(start = Spacing.m),
                 )
             }
         }
@@ -409,24 +416,24 @@ private fun FoodSummary(date: LocalDate, day: FoodDay?, balance: FoodBalance?, p
         }
         provider?.let {
             Text(
-                "Питание: $it",
+                stringResource(R.string.more_food_provider, it),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f),
             )
         }
         Row(
-            Modifier.padding(top = 12.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            Modifier.padding(top = Spacing.m),
+            horizontalArrangement = Arrangement.spacedBy(Spacing.s),
         ) {
             balance?.let {
                 StatusPill(
-                    text = "Баланс ${formatRub(it.amount)}",
+                    text = stringResource(R.string.more_food_balance, formatRub(it.amount)),
                     containerColor = MaterialTheme.colorScheme.primary,
                     contentColor = MaterialTheme.colorScheme.onPrimary,
                 )
             }
             day?.buffet?.hoursText()?.let {
-                StatusPill(text = "Буфет $it", icon = Icons.Rounded.Storefront)
+                StatusPill(text = stringResource(R.string.more_food_buffet_pill, it), icon = Icons.Rounded.Storefront)
             }
         }
     }
@@ -434,7 +441,7 @@ private fun FoodSummary(date: LocalDate, day: FoodDay?, balance: FoodBalance?, p
 
 @Composable
 private fun ComplexHeader(complex: FoodComplex) {
-    Column(Modifier.padding(top = 16.dp, bottom = 6.dp, start = 4.dp, end = 4.dp)) {
+    Column(Modifier.padding(top = Spacing.l, bottom = 6.dp, start = Spacing.xs, end = Spacing.xs)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
                 complex.kind?.title ?: complex.name,
@@ -449,9 +456,9 @@ private fun ComplexHeader(complex: FoodComplex) {
         }
         val tags = buildList {
             if (complex.kind != null && complex.name.isNotBlank()) add(complex.name)
-            if (complex.isPreferential) add("льготное")
-            if (complex.isPaid) add("платное")
-            if (complex.preorderAllowed) add("предзаказ")
+            if (complex.isPreferential) add(stringResource(R.string.more_food_tag_preferential))
+            if (complex.isPaid) add(stringResource(R.string.more_food_tag_paid))
+            if (complex.preorderAllowed) add(stringResource(R.string.more_food_tag_preorder))
         }
         if (tags.isNotEmpty()) {
             Text(
@@ -467,18 +474,19 @@ private fun ComplexHeader(complex: FoodComplex) {
 @Composable
 private fun DishItem(dish: Dish, shape: Shape, showPrice: Boolean) {
     var expanded by remember { mutableStateOf(false) }
-    val hasDetails = dish.ingredients != null || dish.nutrition() != null
+    val hasDetails = dish.ingredients != null || dish.nutrition()
+
     MesCard(
         onClick = if (hasDetails) ({ expanded = !expanded }) else null,
         shape = shape,
-        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
+        contentPadding = PaddingValues(horizontal = Spacing.l, vertical = Spacing.m),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
                 Text(dish.name, style = MaterialTheme.typography.titleMedium)
                 val meta = listOfNotNull(
-                    dish.weightGrams?.let { "$it г" },
-                    dish.calories?.takeIf { it > 0 }?.let { "${it.roundToInt()} ккал" },
+                    dish.weightGrams?.let { stringResource(R.string.more_food_weight, it) },
+                    dish.calories?.takeIf { it > 0 }?.let { stringResource(R.string.more_food_calories, it.roundToInt()) },
                 ).joinToString(" · ")
                 if (meta.isNotEmpty()) {
                     Text(meta, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -489,7 +497,7 @@ private fun DishItem(dish: Dish, shape: Shape, showPrice: Boolean) {
                     formatRub(dish.price),
                     style = MaterialTheme.typography.titleMedium,
                     color = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.padding(start = 12.dp),
+                    modifier = Modifier.padding(start = Spacing.m),
                 )
             }
         }
@@ -498,10 +506,10 @@ private fun DishItem(dish: Dish, shape: Shape, showPrice: Boolean) {
                 Text(
                     it,
                     style = MaterialTheme.typography.bodyMedium,
-                    modifier = Modifier.padding(top = 8.dp),
+                    modifier = Modifier.padding(top = Spacing.s),
                 )
             }
-            dish.nutrition()?.let {
+            nutritionText(dish)?.let {
                 Text(
                     it,
                     style = MaterialTheme.typography.labelLarge,
@@ -522,10 +530,13 @@ private fun FoodWeekBar(
     onShift: (Long) -> Unit,
 ) {
     val today = LocalDate.now()
-    Column(Modifier.padding(horizontal = 12.dp, vertical = 4.dp)) {
+    Column(Modifier.padding(horizontal = Spacing.m, vertical = Spacing.xs)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             FilledTonalIconButton(onClick = { onShift(-1) }, shapes = IconButtonDefaults.shapes()) {
-                Icon(Icons.AutoMirrored.Rounded.KeyboardArrowLeft, contentDescription = "Предыдущая неделя")
+                Icon(
+                    Icons.AutoMirrored.Rounded.KeyboardArrowLeft,
+                    contentDescription = stringResource(R.string.more_food_prev_week_cd),
+                )
             }
             AnimatedContent(weekTitle(monday), label = "food_week", modifier = Modifier.weight(1f)) { title ->
                 Text(
@@ -536,14 +547,17 @@ private fun FoodWeekBar(
                 )
             }
             FilledTonalIconButton(onClick = { onShift(1) }, shapes = IconButtonDefaults.shapes()) {
-                Icon(Icons.AutoMirrored.Rounded.KeyboardArrowRight, contentDescription = "Следующая неделя")
+                Icon(
+                    Icons.AutoMirrored.Rounded.KeyboardArrowRight,
+                    contentDescription = stringResource(R.string.more_food_next_week_cd),
+                )
             }
         }
         Row(
             Modifier
                 .fillMaxWidth()
-                .padding(top = 4.dp),
-            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                .padding(top = Spacing.xs),
+            horizontalArrangement = Arrangement.spacedBy(Spacing.xs),
         ) {
             repeat(7) { i ->
                 val date = monday.plusDays(i.toLong())
@@ -580,14 +594,31 @@ private fun FoodWeekBar(
 private fun Buffet.hoursText(): String? =
     if (openAt != null && closeAt != null) "${openAt!!.toHM()}–${closeAt!!.toHM()}" else null
 
-private fun Dish.nutrition(): String? {
+/** Есть ли хоть один ненулевой БЖУ — от этого зависит, показывается ли строка «Состав». */
+private fun Dish.nutrition(): Boolean =
+    listOf(protein, fat, carbohydrates).any { (it ?: 0.0) > 0 }
+
+/** Строки лицевого счёта: подписи и «не задан(о)» — ресурсами, рубли и номер — данными. */
+@Composable
+private fun accountRows(balance: FoodBalance?): List<Pair<String, String>> = listOfNotNull(
+    balance?.contractId?.let {
+        stringResource(R.string.more_food_account_title) to stringResource(R.string.more_food_account_number, it)
+    },
+    stringResource(R.string.more_food_day_limit) to
+        (balance?.dayLimit?.let(::formatRub) ?: stringResource(R.string.more_food_not_set_masc)),
+    stringResource(R.string.more_food_warn_below) to
+        (balance?.lowBalanceThreshold?.let(::formatRub) ?: stringResource(R.string.more_food_not_set_fem)),
+)
+
+/** Строка БЖУ: буквы-обозначения и разделитель — ресурсами. */
+@Composable
+private fun nutritionText(dish: Dish): String? {
     val parts = listOfNotNull(
-        protein?.let { "Б ${it.roundToInt()}" },
-        fat?.let { "Ж ${it.roundToInt()}" },
-        carbohydrates?.let { "У ${it.roundToInt()}" },
+        dish.protein?.let { stringResource(R.string.more_food_bju_protein, it.roundToInt()) },
+        dish.fat?.let { stringResource(R.string.more_food_bju_fat, it.roundToInt()) },
+        dish.carbohydrates?.let { stringResource(R.string.more_food_bju_carbs, it.roundToInt()) },
     )
-    return parts.takeIf { list -> list.isNotEmpty() && listOf(protein, fat, carbohydrates).any { (it ?: 0.0) > 0 } }
-        ?.joinToString(" · ")
+    return parts.takeIf { it.isNotEmpty() && dish.nutrition() }?.joinToString(" · ")
 }
 
 private fun formatRub(amount: Double): String =

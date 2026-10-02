@@ -35,7 +35,7 @@ jobs:
       - name: Unit tests
         run: ./gradlew testDebugUnitTest
 
-      - name: Build release APK
+      - name: Build release APKs
         env:
           BUILD_NUMBER: ${{ github.run_number }}
           SIGNING_STORE_PASSWORD: ${{ secrets.SIGNING_STORE_PASSWORD }}
@@ -45,9 +45,20 @@ jobs:
           ./gradlew :app:assembleRelease
           VERSION=$(sed -n 's/.*versionName = "\(.*\)".*/\1/p' app/build.gradle.kts)
           echo "VERSION=$VERSION" >> "$GITHUB_ENV"
-          mv app/build/outputs/apk/release/app-release.apk "OpenMES-$VERSION.apk"
 
-      - name: Upload APK
+          # Сборка разбита по архитектурам (splits.abi в app/build.gradle.kts), и
+          # каждая приходит своим именем файла. Переименовываем в OpenMES-<версия>-<abi>.apk:
+          # в релизе имена различаются, и по ссылке видно, что ставится.
+          # armv7a/armv8 — имена пользователя, как он их называет; x86_64 и universal
+          # оставляем в том виде, в каком их знает Android.
+          OUT=app/build/outputs/apk/release
+          mv "$OUT/app-armeabi-v7a-release.apk" "OpenMES-$VERSION-armv7a.apk"
+          mv "$OUT/app-arm64-v8a-release.apk" "OpenMES-$VERSION-armv8.apk"
+          mv "$OUT/app-x86_64-release.apk" "OpenMES-$VERSION-x86_64.apk"
+          mv "$OUT/app-universal-release.apk" "OpenMES-$VERSION-universal.apk"
+          ls -l OpenMES-*.apk
+
+      - name: Upload APKs
         uses: actions/upload-artifact@v7
         with:
           name: OpenMES-apk
@@ -55,6 +66,8 @@ jobs:
 
       # Релиз на каждую версию: тег v<версия>, название — просто версия.
       # Повторный пуш с той же версией обновляет APK в уже созданном релизе.
+      # Файлы перечислены поимённо, а не маской: маска зацепила бы и APK предыдущей
+      # сборки, если она осталась в каталоге, и в релиз попали бы дубли.
       - name: Publish release
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: softprops/action-gh-release@v3
@@ -62,7 +75,11 @@ jobs:
           tag_name: v${{ env.VERSION }}
           target_commitish: ${{ github.sha }}
           name: ${{ env.VERSION }}
-          files: OpenMES-*.apk
+          files: |
+            OpenMES-${{ env.VERSION }}-armv7a.apk
+            OpenMES-${{ env.VERSION }}-armv8.apk
+            OpenMES-${{ env.VERSION }}-x86_64.apk
+            OpenMES-${{ env.VERSION }}-universal.apk
           overwrite_files: true
           generate_release_notes: true
           make_latest: true

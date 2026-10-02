@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Имя продукта не переводится -->
+    <string name="auth_app_name" translatable="false">OpenMES</string>
+    <string name="auth_tagline">Открытый клиент «Колледжа МЭШ»</string>
+
+    <!-- Список возможностей на экране входа -->
+    <string name="auth_feature_schedule">Расписание уроков и каникул</string>
+    <string name="auth_feature_marks">Оценки, ДЗ и зачётная книжка</string>
+    <string name="auth_feature_done">Отметки о выполнении</string>
+    <string name="auth_feature_design">Material You и expressive-дизайн</string>
+
+    <!-- Кнопка входа -->
+    <string name="auth_login_button">Войти через mos.ru</string>
+    <string name="auth_preparing">Готовим вход…</string>
+
+    <!-- Ошибки -->
+    <string name="auth_login_prepare_failed">Не удалось подготовить вход</string>
+    <string name="auth_browser_missing">Нет браузера, чтобы открыть страницу входа mos.ru. Установите браузер и попробуйте снова</string>
+
+    <!-- Подпись под кнопкой и ссылка на исходники -->
+    <string name="auth_disclaimer">Откроется официальный портал login.mos.ru.\nПосле входа браузер вернёт вас в приложение.\nOpenMES не видит и не хранит ваш пароль.</string>
+    <string name="auth_source_code">Исходный код · GitHub</string>
+</resources>

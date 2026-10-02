@@ -17,7 +17,8 @@ import android.webkit.WebChromeClient
 import android.webkit.WebResourceRequest
 import android.webkit.WebView
 import android.webkit.WebViewClient
-import android.widget.Toast
+import ru.openmes.core.designsystem.components.MesSnackbarHost
+import ru.openmes.core.designsystem.components.mesSnackbar
 import androidx.activity.ComponentActivity
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.compose.setContent
@@ -44,6 +45,8 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.lifecycleScope
@@ -57,6 +60,7 @@ import ru.openmes.core.data.SettingsRepository
 import ru.openmes.core.data.ThemeMode
 import ru.openmes.core.data.TokenStore
 import ru.openmes.core.designsystem.theme.OpenMESTheme
+import ru.openmes.feature.homework.R
 import java.net.HttpURLConnection
 import java.net.URL
 import java.util.Base64
@@ -84,7 +88,8 @@ class LibraryActivity : ComponentActivity() {
     private val settingsRepository: SettingsRepository by inject()
 
     private var webView: WebView? = null
-    private var barTitle by mutableStateOf("Библиотека МЭШ")
+    /** Заголовок окна: «Библиотека МЭШ», пока страница не подменила его своим. */
+    private var barTitle by mutableStateOf("")
     private var loadProgress by mutableIntStateOf(0)
 
     /** Повторная авторизация — одна на запуск, чтобы не зациклиться при реальном ограничении. */
@@ -94,6 +99,8 @@ class LibraryActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        // Заголовок по умолчанию — из ресурса, дальше его подменяет заголовок страницы.
+        barTitle = getString(R.string.homework_library_title)
         val startUrl = intent.getStringExtra(EXTRA_URL) ?: LIBRARY_HOME
         authTried = savedInstanceState?.getBoolean(STATE_AUTH_TRIED) ?: false
         setupCookies()
@@ -115,20 +122,24 @@ class LibraryActivity : ComponentActivity() {
             }
             OpenMESTheme(darkTheme = darkTheme, dynamicColor = settings.dynamicColor) {
                 Scaffold(
+                    snackbarHost = { MesSnackbarHost() },
                     topBar = {
                         TopAppBar(
                             title = { Text(barTitle, maxLines = 1, overflow = TextOverflow.Ellipsis) },
                             navigationIcon = {
                                 IconButton(onClick = ::finish) {
-                                    Icon(Icons.Rounded.Close, contentDescription = "Закрыть")
+                                    Icon(Icons.Rounded.Close, contentDescription = stringResource(R.string.homework_library_close_cd))
                                 }
                             },
                             actions = {
                                 IconButton(onClick = { webView?.reload() }) {
-                                    Icon(Icons.Rounded.Refresh, contentDescription = "Обновить")
+                                    Icon(Icons.Rounded.Refresh, contentDescription = stringResource(R.string.homework_library_reload_cd))
                                 }
                                 IconButton(onClick = { webView?.url?.let(::openExternal) }) {
-                                    Icon(Icons.AutoMirrored.Rounded.OpenInNew, contentDescription = "Открыть в браузере")
+                                    Icon(
+                                        Icons.AutoMirrored.Rounded.OpenInNew,
+                                        contentDescription = stringResource(R.string.homework_library_open_external_cd),
+                                    )
                                 }
                             },
                         )
@@ -343,7 +354,7 @@ class LibraryActivity : ComponentActivity() {
             }
             getSystemService(DownloadManager::class.java).enqueue(request)
         }.onSuccess {
-            Toast.makeText(this, "Скачивается: $fileName", Toast.LENGTH_SHORT).show()
+            mesSnackbar.show(getString(R.string.homework_download_started, fileName))
         }.onFailure {
             // DownloadManager отключён или недоступен — хотя бы через браузер.
             openExternal(url)
@@ -371,7 +382,7 @@ class LibraryActivity : ComponentActivity() {
             if (fallback != null) {
                 webView?.loadUrl(fallback)
             } else {
-                Toast.makeText(this, "Нет приложения для открытия ссылки", Toast.LENGTH_SHORT).show()
+                mesSnackbar.show(getString(R.string.homework_no_app_for_link))
             }
         } catch (_: Exception) {
             // Битый intent: из страницы.

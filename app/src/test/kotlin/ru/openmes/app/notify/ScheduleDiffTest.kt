@@ -31,7 +31,7 @@ class ScheduleDiffTest {
     @Test
     fun `без изменений`() {
         val s = listOf(slot("1", "09:00", "Математика"), slot("2", "10:40", "Физика"))
-        assertTrue(diffSchedules(s, s).isEmpty())
+        assertTrue(diffSchedules(s, s, texts = testDiffTexts).isEmpty())
     }
 
     @Test
@@ -39,6 +39,7 @@ class ScheduleDiffTest {
         val changes = diffSchedules(
             listOf(slot("1", "09:00", "Математика")),
             listOf(slot("2", "12:20", "История", room = "305")),
+            texts = testDiffTexts,
         ).map { it.text }
         assertEquals(listOf("09:00 отменена: Математика", "12:20 новая пара: История (каб. 305)"), changes)
     }
@@ -48,6 +49,7 @@ class ScheduleDiffTest {
         val changes = diffSchedules(
             listOf(slot("1", "09:00", "Математика")),
             listOf(slot("7", "09:00", "Физика")),
+            texts = testDiffTexts,
         ).map { it.text }
         assertEquals(listOf("09:00 замена: Математика → Физика"), changes)
     }
@@ -57,6 +59,7 @@ class ScheduleDiffTest {
         val changes = diffSchedules(
             listOf(slot("1", "09:00", "Математика")),
             listOf(slot("1", "10:40", "Математика", room = "310")),
+            texts = testDiffTexts,
         ).map { it.text }
         assertEquals(listOf("09:00 Математика: перенос 09:00 → 10:40, кабинет 204 → 310"), changes)
     }
@@ -68,6 +71,7 @@ class ScheduleDiffTest {
             listOf(slot("1", "09:00", "Математика", room = "310", teacher = "Петров")),
             includeRooms = false,
             includeTeachers = false,
+            texts = testDiffTexts,
         )
         assertTrue(changes.isEmpty())
     }
@@ -77,6 +81,7 @@ class ScheduleDiffTest {
         val changes = diffSchedules(
             listOf(slot("1", "09:00", "Математика")),
             listOf(slot("1", "09:00", "Математика", room = null, distance = true)),
+            texts = testDiffTexts,
         ).map { it.text }
         assertEquals(listOf("09:00 Математика: теперь дистанционно"), changes)
     }

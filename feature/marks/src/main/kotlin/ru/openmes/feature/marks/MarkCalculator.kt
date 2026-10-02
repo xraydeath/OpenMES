@@ -15,6 +15,8 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
@@ -54,6 +56,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
@@ -63,9 +66,11 @@ import ru.openmes.core.designsystem.components.MarkBadge
 import ru.openmes.core.designsystem.components.ShapeIcon
 import ru.openmes.core.designsystem.components.markShape
 import ru.openmes.core.designsystem.components.markTone
+import ru.openmes.core.designsystem.theme.Spacing
 import ru.openmes.core.model.Mark
 import ru.openmes.core.model.RoundingRules
 import ru.openmes.core.model.SubjectPeriod
+import ru.openmes.feature.marks.R
 import java.math.BigDecimal
 import java.math.RoundingMode
 
@@ -83,6 +88,7 @@ internal fun MarkCalculator(
     onKeyboardModeChange: (Boolean) -> Unit,
     rules: RoundingRules,
     onRulesChange: (RoundingRules) -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     var editRules by remember { mutableStateOf(false) }
     if (editRules) {
@@ -100,11 +106,14 @@ internal fun MarkCalculator(
     }
 
     Column(
-        Modifier
+        modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp)
-            .padding(bottom = 24.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
+            // Содержимое шторки может не влезть в высоту над клавиатурой — скроллим,
+            // и тогда Compose сам доводит сфокусированное поле до видимой части.
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = Spacing.l)
+            .padding(bottom = Spacing.xl),
+        verticalArrangement = Arrangement.spacedBy(Spacing.m),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             ShapeIcon(
@@ -114,9 +123,9 @@ internal fun MarkCalculator(
                 contentColor = MaterialTheme.colorScheme.onTertiaryContainer,
                 size = 48.dp,
             )
-            Spacer(Modifier.width(12.dp))
+            Spacer(Modifier.width(Spacing.m))
             Column(Modifier.weight(1f)) {
-                Text("Калькулятор оценок", style = MaterialTheme.typography.titleLargeEmphasized)
+                Text(stringResource(R.string.marks_calc_title), style = MaterialTheme.typography.titleLargeEmphasized)
                 Text(
                     "$subjectName, ${period.title.lowercase()}",
                     style = MaterialTheme.typography.bodyMedium,
@@ -124,7 +133,7 @@ internal fun MarkCalculator(
                 )
             }
             FilledTonalIconButton(onClick = { marks = period.marks }, shapes = IconButtonDefaults.shapes()) {
-                Icon(Icons.Rounded.Refresh, contentDescription = "Сбросить")
+                Icon(Icons.Rounded.Refresh, contentDescription = stringResource(R.string.marks_calc_reset_cd))
             }
         }
 
@@ -136,23 +145,23 @@ internal fun MarkCalculator(
         ) {
             if (!valid) {
                 Text(
-                    "Уберите нечисловые оценки (тапом), чтобы посчитать средний",
+                    stringResource(R.string.marks_calc_hint_non_numeric),
                     style = MaterialTheme.typography.bodyLarge,
                 )
             } else if (marks.isEmpty()) {
-                Text("Оценок нет — добавьте их ниже", style = MaterialTheme.typography.bodyLarge)
+                Text(stringResource(R.string.marks_calc_hint_empty), style = MaterialTheme.typography.bodyLarge)
             } else {
                 val average = marks.weightedAverage()
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
-                        Text("Средний балл", style = MaterialTheme.typography.labelLarge)
+                        Text(stringResource(R.string.marks_calc_average_label), style = MaterialTheme.typography.labelLarge)
                         AnimatedContent("%.2f".format(average), label = "calc_avg") { v ->
                             Text(v, style = MaterialTheme.typography.displayMediumEmphasized)
                         }
                         val base = period.value
                         if (base != null) {
                             Text(
-                                "было $base",
+                                stringResource(R.string.marks_calc_was, base),
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = LocalContentColor.current.copy(alpha = 0.72f),
                             )
@@ -160,7 +169,7 @@ internal fun MarkCalculator(
                     }
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         MarkBadge(rules.markFor(average).toString(), large = true)
-                        Text("итог", style = MaterialTheme.typography.labelMedium)
+                        Text(stringResource(R.string.marks_calc_total_label), style = MaterialTheme.typography.labelMedium)
                     }
                 }
             }
@@ -178,17 +187,19 @@ internal fun MarkCalculator(
                 }
             }
             Text(
-                "Тап по оценке — убрать её",
+                stringResource(R.string.marks_calc_hint_tap),
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
 
+        val keyboardLabel = stringResource(R.string.marks_calc_mode_keyboard)
+        val buttonsLabel = stringResource(R.string.marks_calc_mode_buttons)
         ConnectedChoiceGroup(
             options = listOf(false, true),
             selected = keyboardMode,
             onSelect = onKeyboardModeChange,
-            label = { if (it) "Клавиатура" else "Кнопки" },
+            label = { if (it) keyboardLabel else buttonsLabel },
             icon = { if (it) Icons.Rounded.Keyboard else Icons.Rounded.Apps },
         )
 
@@ -210,8 +221,8 @@ internal fun MarkCalculator(
                     modifier = Modifier.fillMaxWidth(),
                     singleLine = true,
                     shape = MaterialTheme.shapes.large,
-                    label = { Text("Добавить оценки") },
-                    supportingText = { Text("Через пробел, вес через ^: 5 4^2 3") },
+                    label = { Text(stringResource(R.string.marks_calc_input_label)) },
+                    supportingText = { Text(stringResource(R.string.marks_calc_input_hint)) },
                     keyboardOptions = KeyboardOptions(
                         keyboardType = KeyboardType.Ascii,
                         imeAction = ImeAction.Done,
@@ -219,7 +230,7 @@ internal fun MarkCalculator(
                     keyboardActions = KeyboardActions(onDone = { submit() }),
                     trailingIcon = {
                         FilledIconButton(onClick = submit, shapes = IconButtonDefaults.shapes()) {
-                            Icon(Icons.Rounded.ArrowUpward, contentDescription = "Добавить")
+                            Icon(Icons.Rounded.ArrowUpward, contentDescription = stringResource(R.string.marks_calc_add_cd))
                         }
                     },
                 )
@@ -234,7 +245,7 @@ internal fun MarkCalculator(
         ) {
             Icon(Icons.Rounded.DeleteSweep, contentDescription = null, modifier = Modifier.size(ButtonDefaults.IconSize))
             Spacer(Modifier.size(ButtonDefaults.IconSpacing))
-            Text("Очистить все")
+            Text(stringResource(R.string.marks_calc_clear_all))
         }
     }
 }
@@ -249,9 +260,13 @@ private fun GoalsCard(marks: List<Mark>, rules: RoundingRules, onEditRules: () -
     val current = rules.markFor(marks.weightedAverage())
     val goals = (current + 1..5).map { target ->
         val options = (5 downTo target).mapNotNull { value ->
-            marksNeeded(marks, value, target, rules)?.let { "$it × $value" }
+            marksNeeded(marks, value, target, rules)?.let {
+                stringResource(R.string.marks_calc_need_count, it, value)
+            }
         }
-        "до «$target»" to (options.joinToString(" или ").ifEmpty { "больше $MAX_NEEDED оценок — недостижимо" })
+        stringResource(R.string.marks_calc_need_target, target) to
+            options.joinToString(stringResource(R.string.marks_calc_or))
+                .ifEmpty { stringResource(R.string.marks_calc_unreachable, MAX_NEEDED) }
     }
     val reserve = if (current > 2) marksReserve(marks, 2, current, rules) else null
     if (goals.isEmpty() && reserve == null) return
@@ -260,8 +275,8 @@ private fun GoalsCard(marks: List<Mark>, rules: RoundingRules, onEditRules: () -
         color = MaterialTheme.colorScheme.surfaceContainerHigh,
         modifier = Modifier.fillMaxWidth(),
     ) {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Text("Что нужно", style = MaterialTheme.typography.titleMediumEmphasized)
+        Column(Modifier.padding(Spacing.l), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text(stringResource(R.string.marks_calc_goals_title), style = MaterialTheme.typography.titleMediumEmphasized)
             goals.forEach { (title, value) ->
                 Row {
                     Text(title, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.width(72.dp))
@@ -271,9 +286,9 @@ private fun GoalsCard(marks: List<Mark>, rules: RoundingRules, onEditRules: () -
             if (reserve != null) {
                 Text(
                     when (reserve) {
-                        0 -> "Любая двойка опустит итог до «${current - 1}»"
-                        MAX_NEEDED -> "«$current» не опустится даже от $MAX_NEEDED двоек"
-                        else -> "«$current» выдержит двоек: $reserve"
+                        0 -> stringResource(R.string.marks_calc_reserve_drops, current - 1)
+                        MAX_NEEDED -> stringResource(R.string.marks_calc_reserve_never, current, MAX_NEEDED)
+                        else -> stringResource(R.string.marks_calc_reserve_count, current, reserve)
                     },
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -281,7 +296,7 @@ private fun GoalsCard(marks: List<Mark>, rules: RoundingRules, onEditRules: () -
             }
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                    "Оценки веса 1. Пороги: ${rules.describe()}",
+                    stringResource(R.string.marks_calc_rules_hint, rules.describe()),
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.weight(1f),
@@ -289,7 +304,7 @@ private fun GoalsCard(marks: List<Mark>, rules: RoundingRules, onEditRules: () -
                 TextButton(onClick = onEditRules, shapes = ButtonDefaults.shapes()) {
                     Icon(Icons.Rounded.Tune, contentDescription = null, modifier = Modifier.size(18.dp))
                     Spacer(Modifier.width(6.dp))
-                    Text("Изменить")
+                    Text(stringResource(R.string.marks_calc_edit))
                 }
             }
         }
@@ -309,7 +324,10 @@ internal fun marksReserve(marks: List<Mark>, value: Int, current: Int, rules: Ro
 
 private fun Double.fmt(): String = "%.2f".format(this).trimEnd('0').trimEnd(',', '.')
 
-private fun RoundingRules.describe() = "«5» от ${five.fmt()}, «4» от ${four.fmt()}, «3» от ${three.fmt()}"
+/** Пороги округления одной строкой: «5» от …, «4» от …, «3» от …. */
+@Composable
+private fun RoundingRules.describe(): String =
+    stringResource(R.string.marks_calc_rules_describe, five.fmt(), four.fmt(), three.fmt())
 
 /** Пороги округления: готовые варианты или свои значения. */
 @Composable
@@ -325,14 +343,14 @@ private fun RoundingRulesDialog(rules: RoundingRules, onDismiss: () -> Unit, onS
     AlertDialog(
         onDismissRequest = onDismiss,
         icon = { Icon(Icons.Rounded.Tune, contentDescription = null) },
-        title = { Text("Пороги округления") },
+        title = { Text(stringResource(R.string.marks_calc_thresholds_title)) },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Column(verticalArrangement = Arrangement.spacedBy(Spacing.m)) {
                 Text(
-                    "С какого среднего балла ставится итоговая. В колледжах бывает по-разному — уточните у куратора.",
+                    stringResource(R.string.marks_calc_thresholds_description),
                     style = MaterialTheme.typography.bodyMedium,
                 )
-                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(Spacing.s)) {
                     presets.forEach { p ->
                         FilterChip(
                             selected = candidate == p,
@@ -342,14 +360,14 @@ private fun RoundingRulesDialog(rules: RoundingRules, onDismiss: () -> Unit, onS
                     }
                 }
                 listOf(
-                    Triple("«5» от", five) { v: String -> five = v },
-                    Triple("«4» от", four) { v: String -> four = v },
-                    Triple("«3» от", three) { v: String -> three = v },
-                ).forEach { (label, value, set) ->
+                    Triple(R.string.marks_calc_threshold_five, five) { v: String -> five = v },
+                    Triple(R.string.marks_calc_threshold_four, four) { v: String -> four = v },
+                    Triple(R.string.marks_calc_threshold_three, three) { v: String -> three = v },
+                ).forEach { (labelRes, value, set) ->
                     OutlinedTextField(
                         value = value,
                         onValueChange = { v -> set(v.filter { it.isDigit() || it == ',' || it == '.' }.take(5)) },
-                        label = { Text(label) },
+                        label = { Text(stringResource(labelRes)) },
                         singleLine = true,
                         isError = parse(value)?.let { it in 2.0..5.0 } != true,
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
@@ -358,7 +376,7 @@ private fun RoundingRulesDialog(rules: RoundingRules, onDismiss: () -> Unit, onS
                 }
                 if (!ok) {
                     Text(
-                        "Пороги от 2 до 5, и «5» > «4» > «3»",
+                        stringResource(R.string.marks_calc_thresholds_error),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.error,
                     )
@@ -366,10 +384,14 @@ private fun RoundingRulesDialog(rules: RoundingRules, onDismiss: () -> Unit, onS
             }
         },
         confirmButton = {
-            TextButton(onClick = { candidate?.let(onSave) }, enabled = ok, shapes = ButtonDefaults.shapes()) { Text("Сохранить") }
+            TextButton(onClick = { candidate?.let(onSave) }, enabled = ok, shapes = ButtonDefaults.shapes()) {
+                Text(stringResource(R.string.marks_calc_save))
+            }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss, shapes = ButtonDefaults.shapes()) { Text("Отмена") }
+            TextButton(onClick = onDismiss, shapes = ButtonDefaults.shapes()) {
+                Text(stringResource(R.string.marks_calc_cancel))
+            }
         },
     )
 }

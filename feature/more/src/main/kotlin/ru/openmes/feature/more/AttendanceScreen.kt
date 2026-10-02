@@ -30,7 +30,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Shape
-import androidx.compose.ui.unit.dp
+import androidx.compose.ui.res.stringResource
+import androidx.annotation.StringRes
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
@@ -59,9 +60,11 @@ import ru.openmes.core.designsystem.components.SectionHeader
 import ru.openmes.core.designsystem.components.StatValue
 import ru.openmes.core.designsystem.components.StatusPill
 import ru.openmes.core.designsystem.components.groupShape
+import ru.openmes.core.designsystem.theme.Spacing
 import ru.openmes.core.model.AttendanceEntry
 import ru.openmes.core.model.AttendanceLesson
 import ru.openmes.core.model.MedicalRecord
+import ru.openmes.feature.more.R
 import java.time.DayOfWeek
 import java.time.LocalDate
 
@@ -136,10 +139,10 @@ class AttendanceViewModel(
     }
 }
 
-private enum class AttendanceFilter(val title: String) {
-    All("Все"),
-    Excused("Уважительные"),
-    Unexcused("Без причины"),
+private enum class AttendanceFilter(@StringRes val title: Int) {
+    All(R.string.more_attendance_filter_all),
+    Excused(R.string.more_attendance_filter_excused),
+    Unexcused(R.string.more_attendance_filter_none),
 }
 
 /** Пропуски за учебный год: сводка, справки ЕМИАС и список по дням (причина, статус здоровья). */
@@ -160,8 +163,8 @@ fun AttendanceScreen(viewModel: AttendanceViewModel) {
             state.days.isEmpty() && state.medical.isEmpty() -> ScrollableFill {
                 EmptyState(
                     icon = Icons.Rounded.EventAvailable,
-                    title = "Пропусков нет",
-                    subtitle = "С начала учебного года не отмечено ни одного пропуска",
+                    title = stringResource(R.string.more_attendance_empty_title),
+                    subtitle = stringResource(R.string.more_attendance_empty_sub),
                 )
             }
 
@@ -184,23 +187,27 @@ fun AttendanceScreen(viewModel: AttendanceViewModel) {
 
                 LazyColumn(
                     modifier = Modifier.fillMaxSize(),
-                    contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 24.dp),
+                    contentPadding = PaddingValues(start = Spacing.l, end = Spacing.l, top = Spacing.s, bottom = Spacing.xl),
                     verticalArrangement = Arrangement.spacedBy(GroupGap),
                 ) {
                     item {
                         HeroCard {
-                            Text("С начала учебного года", style = MaterialTheme.typography.titleMediumEmphasized)
+                            Text(stringResource(R.string.more_attendance_year), style = MaterialTheme.typography.titleMediumEmphasized)
                             Row(
                                 Modifier
                                     .fillMaxWidth()
-                                    .padding(top = 16.dp),
+                                    .padding(top = Spacing.l),
                                 horizontalArrangement = Arrangement.SpaceAround,
                             ) {
-                                StatValue(all.size.toString(), "${pluralRu(all.size, "занятие", "занятия", "занятий")}\nпропущено", color = MaterialTheme.colorScheme.primary)
+                                StatValue(
+                                    all.size.toString(),
+                                    stringResource(R.string.more_attendance_stat_skipped, pluralRu(all.size, "занятие", "занятия", "занятий")),
+                                    color = MaterialTheme.colorScheme.primary,
+                                )
                                 StatValue(state.days.size.toString(), pluralRu(state.days.size, "день", "дня", "дней"), color = MaterialTheme.colorScheme.primary)
                                 StatValue(
                                     (all.size - excused).toString(),
-                                    "без\nпричины",
+                                    stringResource(R.string.more_attendance_stat_no_reason),
                                     color = if (all.size - excused > 0) {
                                         MaterialTheme.colorScheme.error
                                     } else {
@@ -214,8 +221,8 @@ fun AttendanceScreen(viewModel: AttendanceViewModel) {
                         val shown = if (allPeriods) periods else periods.take(MEDICAL_PREVIEW)
                         item(key = "medical_header") {
                             SectionHeader(
-                                "Справки ЕМИАС",
-                                modifier = Modifier.padding(top = 12.dp),
+                                stringResource(R.string.more_attendance_medical_header),
+                                modifier = Modifier.padding(top = Spacing.m),
                                 trailing = {
                                     Text(
                                         "${state.medical.size} ${pluralRu(state.medical.size, "день", "дня", "дней")}",
@@ -233,7 +240,11 @@ fun AttendanceScreen(viewModel: AttendanceViewModel) {
                         if (more) {
                             item(key = "medical_more") {
                                 MesListItem(
-                                    headline = if (allPeriods) "Свернуть" else "Показать все (${periods.size})",
+                                    headline = if (allPeriods) {
+                                        stringResource(R.string.more_attendance_collapse)
+                                    } else {
+                                        stringResource(R.string.more_attendance_show_all, periods.size)
+                                    },
                                     icon = if (allPeriods) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore,
                                     shape = groupShape(count - 1, count),
                                     onClick = { allPeriods = !allPeriods },
@@ -243,12 +254,14 @@ fun AttendanceScreen(viewModel: AttendanceViewModel) {
                         }
                     }
                     item {
+                        // label у ConnectedChoiceGroup — обычная функция, подписи разворачиваем заранее.
+                        val filterLabels = AttendanceFilter.entries.associateWith { stringResource(it.title) }
                         ConnectedChoiceGroup(
                             options = AttendanceFilter.entries,
                             selected = filter,
                             onSelect = { filter = it },
-                            label = { it.title },
-                            modifier = Modifier.padding(top = 12.dp, bottom = 4.dp),
+                            label = { filterLabels.getValue(it) },
+                            modifier = Modifier.padding(top = Spacing.m, bottom = Spacing.xs),
                         )
                     }
                     filtered.forEach { day ->
@@ -302,9 +315,9 @@ private fun AttendanceLessonItem(lesson: AttendanceLesson, shape: Shape, modifie
         },
         shape = shape,
         trailingContent = {
-            Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(Spacing.xs)) {
                 StatusPill(
-                    text = lesson.reason?.title ?: "Без причины",
+                    text = lesson.reason?.title ?: stringResource(R.string.more_attendance_filter_none),
                     containerColor = if (excused) {
                         MaterialTheme.colorScheme.secondaryContainer
                     } else {
@@ -363,7 +376,7 @@ private fun onlyWeekendsBetween(a: LocalDate, b: LocalDate): Boolean =
 private fun MedicalPeriodItem(period: MedicalPeriod, shape: Shape, modifier: Modifier = Modifier) {
     val exempt = period.type == "EXEMPT"
     val title = when {
-        exempt && period.partial -> "Освобождение от части предметов"
+        exempt && period.partial -> stringResource(R.string.more_attendance_exempt_partial)
         else -> healthStatusTitle(period.type) ?: period.type
     }
     val dates = if (period.from == period.to) {
@@ -393,10 +406,20 @@ private fun MedicalPeriodItem(period: MedicalPeriod, shape: Shape, modifier: Mod
 /** Без причины — если причины нет или она из «неуважительных». */
 private fun AttendanceLesson.isExcused(): Boolean = reason?.isExcused == true || healthStatus != null
 
-private fun healthStatusTitle(status: String?): String? = when (status) {
-    "SICK" -> "Болеет"
-    "SICK_WITH_INFECTION" -> "Инфекционное заболевание"
-    "EXEMPT" -> "Освобождение"
+/**
+ * Статус здоровья → ресурс подписи. null — статуса нет или он неизвестен:
+ * тогда показываем код как есть.
+ */
+@StringRes
+private fun healthStatusRes(status: String?): Int? = when (status) {
+    "SICK" -> R.string.more_attendance_health_sick
+    "SICK_WITH_INFECTION" -> R.string.more_attendance_health_infection
+    "EXEMPT" -> R.string.more_attendance_health_exempt
     null, "" -> null
-    else -> status
+    else -> null
 }
+
+/** Подпись статуса здоровья; неизвестные коды отдаются как есть. */
+@Composable
+private fun healthStatusTitle(status: String?): String? =
+    healthStatusRes(status)?.let { stringResource(it) } ?: status?.takeIf { it.isNotEmpty() }

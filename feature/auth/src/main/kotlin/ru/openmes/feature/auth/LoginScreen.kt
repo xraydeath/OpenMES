@@ -4,6 +4,7 @@ import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import androidx.annotation.StringRes
 import androidx.browser.customtabs.CustomTabsIntent
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -38,6 +39,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.ViewModel
@@ -59,7 +61,8 @@ import ru.openmes.core.designsystem.components.GroupGap
 import ru.openmes.core.designsystem.components.MesCard
 import ru.openmes.core.designsystem.components.MesListItem
 import ru.openmes.core.designsystem.components.groupShape
-
+import ru.openmes.core.designsystem.theme.Spacing
+import ru.openmes.feature.auth.R
 /**
  * ViewModel входа: готовит OAuth-клиент и ссылку, экран открывает её в браузере
  * (Custom Tabs), после входа браузер возвращает в приложение по deeplink
@@ -72,7 +75,8 @@ class LoginViewModel(
     data class State(
         val preparing: Boolean = false,
         val launchUrl: String? = null,
-        val error: String? = null,
+        /** Ресурс ошибки подготовки входа (разворачивается в UI). */
+        @StringRes val error: Int? = null,
     )
 
     private val _state = MutableStateFlow(State())
@@ -103,7 +107,7 @@ class LoginViewModel(
             }.onSuccess { url ->
                 _state.value = State(launchUrl = url)
             }.onFailure { e ->
-                _state.value = State(error = e.message ?: "Не удалось подготовить вход")
+                _state.value = State(error = R.string.auth_login_prepare_failed)
             }
         }
     }
@@ -114,7 +118,7 @@ class LoginViewModel(
 
     /** Ссылку нечем открыть. */
     fun onBrowserMissing() {
-        _state.value = State(error = "Нет браузера, чтобы открыть страницу входа mos.ru. Установите браузер и попробуйте снова")
+        _state.value = State(error = R.string.auth_browser_missing)
     }
 
     fun consumeError() {
@@ -140,39 +144,43 @@ fun LoginScreen(
         if (openInBrowser(context, url)) viewModel.consumeLaunch() else viewModel.onBrowserMissing()
     }
 
-    val errorText = state.error ?: authError?.takeUnless { state.preparing }
+    val errorText = when {
+        state.error != null -> stringResource(state.error!!)
+        authError != null && !state.preparing -> authError
+        else -> null
+    }
 
     Column(
         modifier = Modifier
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
-            .padding(horizontal = 24.dp),
+            .padding(horizontal = Spacing.xl),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Spacer(Modifier.height(64.dp))
 
         Text(
-            text = "OpenMES",
+            text = stringResource(R.string.auth_app_name),
             style = MaterialTheme.typography.headlineLargeEmphasized,
         )
         Text(
-            text = "Открытый клиент «Колледжа МЭШ»",
+            text = stringResource(R.string.auth_tagline),
             style = MaterialTheme.typography.bodyLarge,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
 
-        Spacer(Modifier.height(32.dp))
+        Spacer(Modifier.height(Spacing.xxl))
 
         val features = listOf(
-            Icons.AutoMirrored.Rounded.EventNote to "Расписание уроков и каникул",
-            Icons.Rounded.School to "Оценки, ДЗ и зачётная книжка",
-            Icons.Rounded.TaskAlt to "Отметки о выполнении",
-            Icons.Rounded.AutoAwesome to "Material You и expressive-дизайн",
+            Icons.AutoMirrored.Rounded.EventNote to R.string.auth_feature_schedule,
+            Icons.Rounded.School to R.string.auth_feature_marks,
+            Icons.Rounded.TaskAlt to R.string.auth_feature_done,
+            Icons.Rounded.AutoAwesome to R.string.auth_feature_design,
         )
         Column(verticalArrangement = Arrangement.spacedBy(GroupGap)) {
-            features.forEachIndexed { index, (icon, text) ->
+            features.forEachIndexed { index, (icon, textRes) ->
                 MesListItem(
-                    headline = text,
+                    headline = stringResource(textRes),
                     icon = icon,
                     iconShape = featureShapes[index].toShape(),
                     iconContainerColor = MaterialTheme.colorScheme.primaryContainer,
@@ -182,7 +190,7 @@ fun LoginScreen(
             }
         }
 
-        Spacer(Modifier.height(32.dp))
+        Spacer(Modifier.height(Spacing.xxl))
 
         Button(
             onClick = {
@@ -201,8 +209,8 @@ fun LoginScreen(
                     modifier = Modifier.size(28.dp),
                     color = MaterialTheme.colorScheme.onPrimary,
                 )
-                Spacer(Modifier.size(12.dp))
-                Text("Готовим вход…", style = MaterialTheme.typography.titleMedium)
+                Spacer(Modifier.size(Spacing.m))
+                Text(stringResource(R.string.auth_preparing), style = MaterialTheme.typography.titleMedium)
             } else {
                 Icon(
                     Icons.AutoMirrored.Rounded.Login,
@@ -211,14 +219,14 @@ fun LoginScreen(
                 )
                 Spacer(Modifier.size(ButtonDefaults.iconSpacingFor(ButtonDefaults.MediumContainerHeight)))
                 Text(
-                    text = "Войти через mos.ru",
+                    text = stringResource(R.string.auth_login_button),
                     style = MaterialTheme.typography.titleMedium,
                 )
             }
         }
 
         if (errorText != null) {
-            Spacer(Modifier.height(12.dp))
+            Spacer(Modifier.height(Spacing.m))
             MesCard(
                 containerColor = MaterialTheme.colorScheme.errorContainer,
                 contentColor = MaterialTheme.colorScheme.onErrorContainer,
@@ -232,21 +240,19 @@ fun LoginScreen(
             }
         }
 
-        Spacer(Modifier.height(16.dp))
+        Spacer(Modifier.height(Spacing.l))
         Text(
-            text = "Откроется официальный портал login.mos.ru.\n" +
-                "После входа браузер вернёт вас в приложение.\n" +
-                "OpenMES не видит и не хранит ваш пароль.",
+            text = stringResource(R.string.auth_disclaimer),
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = TextAlign.Center,
         )
 
         TextButton(onClick = onOpenSource, shapes = ButtonDefaults.shapes()) {
-            Text("Исходный код · GitHub")
+            Text(stringResource(R.string.auth_source_code))
         }
 
-        Spacer(Modifier.height(32.dp))
+        Spacer(Modifier.height(Spacing.xxl))
     }
 }
 

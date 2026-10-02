@@ -31,6 +31,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextLinkStyles
@@ -63,6 +64,7 @@ import ru.openmes.core.designsystem.components.MesPullToRefreshBox
 import ru.openmes.core.designsystem.components.ScrollableFill
 import ru.openmes.core.designsystem.components.StatusPill
 import ru.openmes.core.designsystem.components.openUrl
+import ru.openmes.core.designsystem.theme.Spacing
 import ru.openmes.core.model.NewsBlock
 import ru.openmes.core.model.NewsItem
 import java.time.LocalDate
@@ -183,28 +185,28 @@ fun NewsScreen(viewModel: NewsViewModel, onOpenNews: (Long) -> Unit) {
             state.loading && state.items.isEmpty() -> LoadingState()
             state.error != null && state.items.isEmpty() -> ScrollableFill {
                 ErrorState(
-                    title = "Не удалось загрузить новости",
+                    title = stringResource(R.string.more_news_error),
                     onRetry = viewModel::refresh,
                     details = state.error,
                 )
             }
 
             state.items.isEmpty() -> ScrollableFill {
-                EmptyState(icon = Icons.Rounded.Newspaper, title = "Новостей пока нет")
+                EmptyState(icon = Icons.Rounded.Newspaper, title = stringResource(R.string.more_news_empty))
             }
 
             else -> LazyColumn(
                 state = listState,
                 modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 24.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
+                contentPadding = PaddingValues(start = Spacing.l, end = Spacing.l, top = Spacing.s, bottom = Spacing.xl),
+                verticalArrangement = Arrangement.spacedBy(Spacing.m),
             ) {
                 items(state.items, key = { it.id }) { item ->
                     NewsCard(item, onClick = { onOpenNews(item.id) })
                 }
                 if (state.loadingMore) {
                     item {
-                        Box(Modifier.fillMaxWidth().padding(16.dp), contentAlignment = Alignment.Center) {
+                        Box(Modifier.fillMaxWidth().padding(Spacing.l), contentAlignment = Alignment.Center) {
                             LoadingIndicator(Modifier.size(40.dp))
                         }
                     }
@@ -228,7 +230,7 @@ private fun NewsCard(item: NewsItem, onClick: () -> Unit) {
             )
         }
         Column(
-            Modifier.padding(16.dp),
+            Modifier.padding(Spacing.l),
             verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
             NewsMeta(item)
@@ -247,7 +249,7 @@ private fun NewsCard(item: NewsItem, onClick: () -> Unit) {
 private fun NewsMeta(item: NewsItem) {
     Row(
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        horizontalArrangement = Arrangement.spacedBy(Spacing.s),
     ) {
         item.channelLogo?.let {
             AsyncImage(
@@ -285,13 +287,17 @@ fun NewsDetailScreen(viewModel: NewsDetailViewModel) {
         when {
             state.loading && item == null -> LoadingState()
             item == null -> ScrollableFill {
-                ErrorState(title = "Не удалось открыть новость", onRetry = viewModel::refresh, details = state.error)
+                ErrorState(
+                    title = stringResource(R.string.more_news_detail_error),
+                    onRetry = viewModel::refresh,
+                    details = state.error,
+                )
             }
 
             else -> LazyColumn(
                 modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 24.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
+                contentPadding = PaddingValues(start = Spacing.l, end = Spacing.l, top = Spacing.s, bottom = Spacing.xl),
+                verticalArrangement = Arrangement.spacedBy(Spacing.m),
             ) {
                 item.coverUrl?.let { cover ->
                     item {
@@ -304,10 +310,10 @@ fun NewsDetailScreen(viewModel: NewsDetailViewModel) {
                     }
                 }
                 item {
-                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Column(verticalArrangement = Arrangement.spacedBy(Spacing.s)) {
                         NewsMeta(item)
                         Text(item.title, style = MaterialTheme.typography.headlineSmallEmphasized)
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Row(horizontalArrangement = Arrangement.spacedBy(Spacing.s)) {
                             item.tags.forEach { StatusPill(it) }
                             item.views?.let { StatusPill("$it", icon = Icons.Rounded.Visibility) }
                         }
@@ -328,8 +334,8 @@ fun NewsDetailScreen(viewModel: NewsDetailViewModel) {
                         )
 
                         is NewsBlock.Video -> MesListItem(
-                            headline = "Видео",
-                            supporting = "Открыть в браузере",
+                            headline = stringResource(R.string.more_news_video),
+                            supporting = stringResource(R.string.more_news_video_open),
                             icon = Icons.Rounded.PlayCircle,
                             onClick = { context.openUrl(block.url) },
                         )

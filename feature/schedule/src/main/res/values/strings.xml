@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Ошибки загрузки -->
+    <string name="schedule_server_unavailable">Сервер МЭШ временно недоступен — потяни вниз для повтора</string>
+    <string name="schedule_refresh_failed_banner">Не удалось обновить — показано сохранённое. Нажмите, чтобы повторить</string>
+    <!-- Строка ошибки и деталь от сервера/сети: «Не удалось…: Таймаут» -->
+    <string name="schedule_error_detail">%1$s: %2$s</string>
+
+    <!-- Выгрузка PDF недели -->
+    <string name="schedule_pdf_failed">Не удалось получить PDF</string>
+    <string name="schedule_pdf_no_app">Нет приложения для PDF</string>
+    <string name="schedule_pdf_share_title">Расписание</string>
+    <string name="schedule_pdf_cd">Расписание недели в PDF</string>
+
+    <!-- День и пустой день -->
+    <string name="schedule_day_subtitle">%1$s, %2$d</string>
+    <string name="schedule_empty_title">Уроков нет</string>
+    <string name="schedule_day_vacation">Каникулы</string>
+    <string name="schedule_day_off">Выходной</string>
+    <string name="schedule_day_no_lessons">Занятий в этот день нет</string>
+
+    <!-- Карточка урока -->
+    <string name="schedule_now">СЕЙЧАС</string>
+    <string name="schedule_distance">Дистанционно</string>
+    <string name="schedule_break">Перемена %1$d мин</string>
+    <string name="schedule_absence_mark">Н</string>
+    <string name="schedule_absence_cd">Пропуск: %1$s</string>
+    <string name="schedule_absence_cd_short">Пропуск</string>
+
+    <!-- Значки урока (описания для доступности) -->
+    <string name="schedule_test_cd">Контрольное занятие</string>
+    <string name="schedule_distance_lesson">Дистанционное занятие</string>
+    <string name="schedule_homework_cd">Есть ДЗ</string>
+
+    <!-- Шторка деталей урока -->
+    <string name="schedule_detail_module">Модуль / тема</string>
+    <string name="schedule_detail_teacher">Преподаватель</string>
+    <string name="schedule_detail_room">Кабинет</string>
+    <string name="schedule_detail_building">Корпус</string>
+    <string name="schedule_detail_comment">Комментарий</string>
+    <string name="schedule_status_exempt">Освобождение</string>
+    <string name="schedule_status_sick">Болезнь</string>
+    <string name="schedule_status_sick_infection">Болезнь (инфекция)</string>
+    <string name="schedule_missed">Не был</string>
+    <string name="schedule_missed_reason">Не был · %1$s</string>
+    <string name="schedule_join_lesson">Подключиться к занятию</string>
+    <string name="schedule_homework_section">Домашнее задание</string>
+    <string name="schedule_homework_done">Выполнено</string>
+    <string name="schedule_marks_section">Оценки</string>
+</resources>

@@ -4,7 +4,8 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
-import android.widget.Toast
+import androidx.compose.material3.SnackbarDuration
+import ru.openmes.core.designsystem.components.mesSnackbar
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -36,10 +37,10 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
-import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.FileProvider
 import androidx.lifecycle.ViewModel
@@ -55,18 +56,19 @@ import ru.openmes.core.data.ApiConsoleResponse
 import ru.openmes.core.designsystem.components.HeroCard
 import ru.openmes.core.designsystem.components.SectionHeader
 import ru.openmes.core.designsystem.components.StatusPill
+import ru.openmes.core.designsystem.theme.Spacing
 import java.io.File
 
-/** Готовые запросы: финансы и то, для чего ещё нет экранов. */
+/** Готовые запросы: финансы и то, для чего ещё нет экранов. Подпись чипа — id ресурса. */
 private val presets = listOf(
-    "Транзакции питания" to "api/food/meals/v3/transactions?personId={personGuid}&from={monthAgo}&to={today}",
-    "Лимиты трат" to "api/food/meals/v3/clients/expense-constraints?personId={personGuid}",
-    "Баланс" to "api/food/meals/v3/clients/balance?clientIds=[{\"personId\":\"{personGuid}\"}]",
-    "История платежей" to "api/family/web/v1/payments/history?contract_id={contractId}",
-    "Договоры" to "api/contract/payments/v1/contracts/search?personId={personGuid}",
-    "Долги" to "api/ej/core/family/v1/academic_debts?student_id={studentId}",
-    "Итоговые оценки" to "api/family/mobile/v1/final_marks?student_id={studentId}",
-    "Рейтинг" to "api/ej/rating/v1/rank/rankShort?personId={personGuid}&beginDate={monthAgo}&endDate={today}",
+    R.string.more_api_preset_food_transactions to "api/food/meals/v3/transactions?personId={personGuid}&from={monthAgo}&to={today}",
+    R.string.more_api_preset_expense_limits to "api/food/meals/v3/clients/expense-constraints?personId={personGuid}",
+    R.string.more_api_preset_balance to "api/food/meals/v3/clients/balance?clientIds=[{\"personId\":\"{personGuid}\"}]",
+    R.string.more_api_preset_payments to "api/family/web/v1/payments/history?contract_id={contractId}",
+    R.string.more_api_preset_contracts to "api/contract/payments/v1/contracts/search?personId={personGuid}",
+    R.string.more_api_preset_debts to "api/ej/core/family/v1/academic_debts?student_id={studentId}",
+    R.string.more_api_preset_final_marks to "api/family/mobile/v1/final_marks?student_id={studentId}",
+    R.string.more_api_preset_rating to "api/ej/rating/v1/rank/rankShort?personId={personGuid}&beginDate={monthAgo}&endDate={today}",
 )
 
 /** Разведка пишет в logcat только начало ответа — сотня запросов не должна вытеснить буфер. */
@@ -124,13 +126,12 @@ fun ApiConsoleScreen(viewModel: ApiConsoleViewModel) {
 
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 24.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
+        contentPadding = PaddingValues(start = Spacing.l, end = Spacing.l, top = Spacing.s, bottom = Spacing.xl),
+        verticalArrangement = Arrangement.spacedBy(Spacing.m),
     ) {
         item {
             Text(
-                "Запросы идут от вашего аккаунта. В ответах могут быть личные данные — " +
-                    "перед отправкой кому-либо просмотрите их.",
+                stringResource(R.string.more_api_disclaimer),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -139,35 +140,40 @@ fun ApiConsoleScreen(viewModel: ApiConsoleViewModel) {
             OutlinedTextField(
                 value = state.path,
                 onValueChange = viewModel::setPath,
-                label = { Text("Путь от school.mos.ru/") },
+                label = { Text(stringResource(R.string.more_api_path_label)) },
                 textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri, imeAction = ImeAction.Send),
                 keyboardActions = KeyboardActions(onSend = { viewModel.send() }),
-                supportingText = { Text("«!» в начале — без роутинга колледжа. {personGuid} {studentId} {profileId} {contractId} {today} {monday} {sunday} {monthAgo}") },
+                supportingText = { Text(stringResource(R.string.more_api_path_hint)) },
                 modifier = Modifier.fillMaxWidth(),
             )
         }
         item {
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(Spacing.s)) {
                 presets.forEach { (title, path) ->
-                    SuggestionChip(onClick = { viewModel.setPath(path) }, label = { Text(title) })
+                    SuggestionChip(onClick = { viewModel.setPath(path) }, label = { Text(stringResource(title)) })
                 }
             }
         }
         item {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Spacing.m)) {
                 Button(onClick = viewModel::send, enabled = !state.loading) {
                     Icon(Icons.AutoMirrored.Rounded.Send, contentDescription = null)
-                    Text("Отправить", Modifier.padding(start = 8.dp))
+                    Text(stringResource(R.string.more_api_send), Modifier.padding(start = Spacing.s))
                 }
                 FilledTonalButton(onClick = viewModel::runProbes, enabled = !state.loading) {
-                    Text("Разведка (${probes.size})")
+                    Text(stringResource(R.string.more_api_probe_button, probes.size))
                 }
                 if (state.loading) LoadingIndicator()
             }
         }
         state.probeDone?.let { done ->
-            item { Text("Разведка: ${done + 1} из ${probes.size}", style = MaterialTheme.typography.bodyMedium) }
+            item {
+                Text(
+                    stringResource(R.string.more_api_probe_progress, done + 1, probes.size),
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+            }
         }
         state.error?.let { error ->
             item {
@@ -182,11 +188,11 @@ fun ApiConsoleScreen(viewModel: ApiConsoleViewModel) {
         state.response?.let { response ->
             item {
                 SectionHeader(
-                    "Ответ",
+                    stringResource(R.string.more_api_response),
                     trailing = {
                         val ok = response.code in 200..299
                         StatusPill(
-                            "${response.code} · ${response.elapsedMillis} мс",
+                            stringResource(R.string.more_api_response_status, response.code, response.elapsedMillis),
                             containerColor = if (ok) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.errorContainer,
                             contentColor = if (ok) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onErrorContainer,
                         )
@@ -199,14 +205,14 @@ fun ApiConsoleScreen(viewModel: ApiConsoleViewModel) {
                 }
             }
             item {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(horizontalArrangement = Arrangement.spacedBy(Spacing.s)) {
                     FilledTonalButton(onClick = { context.copyText(response) }) {
                         Icon(Icons.Rounded.ContentCopy, contentDescription = null)
-                        Text("Копировать", Modifier.padding(start = 8.dp))
+                        Text(stringResource(R.string.more_api_copy), Modifier.padding(start = Spacing.s))
                     }
                     FilledTonalButton(onClick = { context.shareResponse(state.path, response) }) {
                         Icon(Icons.Rounded.Share, contentDescription = null)
-                        Text("Поделиться", Modifier.padding(start = 8.dp))
+                        Text(stringResource(R.string.more_api_share), Modifier.padding(start = Spacing.s))
                     }
                 }
             }
@@ -218,7 +224,7 @@ fun ApiConsoleScreen(viewModel: ApiConsoleViewModel) {
                     val body = response.body
                     SelectionContainer(Modifier.horizontalScroll(rememberScrollState())) {
                         Text(
-                            body.take(SHOWN_CHARS).ifEmpty { "(пустое тело)" },
+                            body.take(SHOWN_CHARS).ifEmpty { stringResource(R.string.more_api_empty_body) },
                             fontFamily = FontFamily.Monospace,
                             fontSize = 11.sp,
                             lineHeight = 14.sp,
@@ -226,9 +232,13 @@ fun ApiConsoleScreen(viewModel: ApiConsoleViewModel) {
                     }
                     if (body.length > SHOWN_CHARS) {
                         Text(
-                            "…показано ${SHOWN_CHARS / 1000} тыс. из ${body.length / 1000} тыс. символов — целиком через «Поделиться»",
+                            stringResource(
+                                R.string.more_api_truncated,
+                                SHOWN_CHARS / 1000,
+                                body.length / 1000,
+                            ),
                             style = MaterialTheme.typography.bodySmall,
-                            modifier = Modifier.padding(top = 8.dp),
+                            modifier = Modifier.padding(top = Spacing.s),
                         )
                     }
                 }
@@ -237,13 +247,13 @@ fun ApiConsoleScreen(viewModel: ApiConsoleViewModel) {
     }
 }
 
-private fun ApiConsoleResponse.asText() = "GET $url\n$code · $elapsedMillis мс\n\n$body"
+private fun Context.asText(response: ApiConsoleResponse) = "GET ${response.url}\n${response.code} · ${response.elapsedMillis} мс\n\n${response.body}"
 
 private fun Context.copyText(response: ApiConsoleResponse) {
-    val text = response.asText()
+    val text = asText(response)
     // Буфер обмена идёт через binder (~1 МБ) — огромные ответы только через файл.
     if (text.length > 400_000) {
-        Toast.makeText(this, "Ответ слишком большой — используйте «Поделиться»", Toast.LENGTH_LONG).show()
+        mesSnackbar.show(getString(R.string.more_api_too_big), duration = SnackbarDuration.Long)
         return
     }
     getSystemService(ClipboardManager::class.java).setPrimaryClip(ClipData.newPlainText("API", text))
@@ -253,11 +263,11 @@ private fun Context.shareResponse(path: String, response: ApiConsoleResponse) {
     val name = path.substringBefore('?').trim('/').replace(Regex("[^A-Za-z0-9_-]+"), "_").takeLast(60)
     val file = File(cacheDir, "exports/api-$name.txt").apply {
         parentFile?.mkdirs()
-        writeText(response.asText())
+        writeText(asText(response))
     }
     val uri = FileProvider.getUriForFile(this, "$packageName.files", file)
     val send = Intent(Intent.ACTION_SEND).setType("text/plain")
         .putExtra(Intent.EXTRA_STREAM, uri)
         .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-    startActivity(Intent.createChooser(send, "Ответ API"))
+    startActivity(Intent.createChooser(send, getString(R.string.more_api_share_title)))
 }
